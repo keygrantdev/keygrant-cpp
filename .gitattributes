@@ -1,0 +1,3 @@
+# The scripts run in a Linux container from a Windows checkout too.
+*.sh text eol=lf
+docker/Dockerfile text eol=lf

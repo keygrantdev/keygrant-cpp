@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "keygrant",
+  "version": "0.1.0",
+  "description": "KeyGrant licensing SDK for native desktop apps: offline-verified Ed25519 leases that fail in favour of the paying customer.",
+  "homepage": "https://keygrant.dev",
+  "dependencies": [
+    "curl",
+    "nlohmann-json",
+    "openssl"
+  ],
+  "features": {
+    "tests": {
+      "description": "Build the SDK's tests (GoogleTest).",
+      "dependencies": [
+        "gtest"
+      ]
+    }
+  }
+}
