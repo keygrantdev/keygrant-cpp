@@ -1,7 +1,7 @@
-// The machinery under License (sdk/src/engine.ts and license.ts): the
-// adapters, one call at a time, every request bounded, the stored state and
-// its clock guard, the online validate and what its answer does to the stored
-// state; and the decisions of when to go online and what to answer.
+// The machinery under License: the adapters, one call at a time, every request
+// bounded, the stored state and its clock guard, the online validate and what
+// its answer does to the stored state; the trial, its launch report and the
+// purchase pickup; and the decisions of when to go online and what to answer.
 #pragma once
 
 #include <chrono>
@@ -20,6 +20,7 @@
 #include "keygrant/license.hpp"
 #include "lease.hpp"
 #include "offline.hpp"
+#include "pickup.hpp"
 #include "renewal.hpp"
 #include "wire.hpp"
 
@@ -40,6 +41,13 @@ class Engine {
   DeactivateResult deactivate();
   LicenseStatus startTrial();
   std::optional<std::string> upgradeUrl(const std::string& paymentLink);
+  std::optional<std::string> purchaseUrl(const std::string& paymentLink);
+
+  /**
+   * Test support, not public API: whether the launch report in flight, if
+   * any, settled within `timeout`.
+   */
+  bool launchReportSettled(std::chrono::milliseconds timeout);
 
  private:
   using Milliseconds = std::chrono::milliseconds;
@@ -76,10 +84,57 @@ class Engine {
     Basis basis;
   };
 
+  /**
+   * How a pickup asks: for startTrial() (`start`: always, under the device
+   * startTrial() read for both its asks, `device`, bounded as a status check
+   * is, a host-name fallback allowed), or for status() (when `force`d, under
+   * the HTTP bound, or when claimDue, bounded as a status check is), reading
+   * the device as a status does and asking only under its own fingerprint.
+   */
+  struct PickupAsk {
+    bool start = false;
+    bool force = false;
+    /// The device startTrial() read for both its asks; none: read here.
+    const Device* device = nullptr;
+  };
+
+  /** What a pickup did: the licensed status when a bought key licensed this device, else the state to answer from. */
+  struct Pickup {
+    std::optional<LicenseStatus> status;
+    StoredState state;
+  };
+
+  /** The launch reports in flight, shared with each report's thread (launchReportSettled). */
+  struct LaunchReports {
+    std::mutex mutex;
+    std::condition_variable settled;
+    int inFlight = 0;
+  };
+
+  /**
+   * One launch report, as its own thread holds it: everything the report
+   * touches, by shared_ptr (the device reader, and through it the
+   * fingerprinter; the HTTP adapter) or by value, and nothing of the engine,
+   * so a License destroyed first leaves nothing it uses dangling.
+   */
+  struct LaunchReport {
+    std::shared_ptr<DeviceIdentityReader> reader;
+    std::shared_ptr<HttpAdapter> http;
+    std::string url;
+    DeviceBounds device;
+    std::optional<DeviceKind> install;
+    bool deviceHold = true;
+    Milliseconds bound;
+    std::optional<std::int64_t> trialStart;
+  };
+
   // --- machinery (engine.cpp) ----------------------------------------------
-  void serial(const std::function<void(bool readOnly)>& work);
+  void serial(const std::function<void(bool readOnly)>& work, Milliseconds extra = Milliseconds{0});
   std::optional<Reply> post(const std::string& action, const ordered_json& body,
                             std::optional<Milliseconds> timeout = std::nullopt);
+  std::string endpoint(const std::string& action) const;
+  static std::optional<Reply> postTo(const std::shared_ptr<HttpAdapter>& http, const std::string& url,
+                                     const ordered_json& body, Milliseconds bound);
   VerifyResult verify(const std::string& lease, std::int64_t now) const;
   LeaseCheck evaluate(const std::string& lease, std::int64_t now, const std::optional<std::string>& key,
                       const std::optional<std::string>& activationId, std::optional<DeviceKind> deviceKind);
@@ -97,6 +152,8 @@ class Engine {
   std::optional<LicenseStatus> tryRenew(const StoredState& state, std::optional<Milliseconds> timeout = std::nullopt);
   Renewal renew(const StoredState& state, std::optional<Milliseconds> timeout);
   Judged judgeFresh(const StoredState& state, const std::optional<Reply>& response);
+  Judged judged(const std::string& lease, const std::string& key, const std::string& activationId,
+                std::optional<DeviceKind> kind, const std::function<std::int64_t()>& fallbackNow);
   ordered_json validateBody(const StoredState& state, const Device& device) const;
 
   // --- decisions (license.cpp) ---------------------------------------------
@@ -104,7 +161,7 @@ class Engine {
   DeactivateResult deactivateNow();
   bool seatElsewhere(const StoredState& state);
   LicenseStatus statusNow(const StoredState& state, bool forceOnline, bool readOnly);
-  LicenseStatus startTrialNow(const StoredState& state);
+  LicenseStatus startTrialNow(const StoredState& state, const Device& known);
   LicenseStatus refusedStatus(const StoredState& state, Refusal refused, bool force);
   LicenseStatus licenseStatus(const StoredState& state, const std::string& lease, std::int64_t now, bool forceOnline,
                               bool readOnly);
@@ -113,10 +170,22 @@ class Engine {
                             const std::optional<StatusAsk>& ask = std::nullopt);
   std::optional<LicenseStatus> healTrial(const StoredState& state, bool forceOnline);
   TrialAsk askTrial(const StoredState& state, Milliseconds machineIdTimeout,
-                    std::optional<Milliseconds> timeout = std::nullopt);
+                    std::optional<Milliseconds> timeout = std::nullopt, const Device* known = nullptr);
   bool keepsItsTrialLease(const StoredState& state, const std::optional<std::string>& answered);
   std::optional<StoredState> loadForStatus(bool readOnly);
   void saveUnsavedTrial();
+
+  // --- the launch report (trials.cpp) --------------------------------------
+  void reportLaunch(const StoredState& state, std::int64_t now);
+  static void sendLaunch(const LaunchReport& report);
+
+  // --- buying from the app (purchases.cpp) ----------------------------------
+  std::optional<std::string> purchaseUrlNow(const std::string& link, bool readOnly);
+  Pickup pickUp(const StoredState& state, PickupAsk ask);
+  StoredState dropSecret(const StoredState& state, const std::string& secret);
+  Pickup claim(const StoredState& state, const std::string& secret, PickupAsk ask);
+  std::optional<Reply> postClaim(const ClaimRequest& body, std::optional<Milliseconds> timeout);
+  Judged judgeClaim(const std::optional<Reply>& response, std::optional<DeviceKind> kind, std::int64_t askedAt);
 
   std::string product_;
   std::string base_;
@@ -127,7 +196,8 @@ class Engine {
   Timings timings_;
   VerifyingKey key_;
   Adapters a_;
-  DeviceIdentityReader reader_;
+  /// Shared with a launch report's thread, which may outlive the engine.
+  std::shared_ptr<DeviceIdentityReader> reader_;
 
   std::mutex serialMutex_;
   std::condition_variable serialChanged_;
@@ -136,6 +206,17 @@ class Engine {
 
   std::mutex unsavedMutex_;
   std::optional<UnsavedTrial> unsaved_;
+
+  std::shared_ptr<LaunchReports> reports_ = std::make_shared<LaunchReports>();
+};
+
+/** Test support, not public API: what the tests reach of a License's engine. */
+class LicenseAccess {
+ public:
+  /// Engine::launchReportSettled of `license`'s engine.
+  static bool launchReportSettled(const License& license, std::chrono::milliseconds timeout) {
+    return license.engine_->launchReportSettled(timeout);
+  }
 };
 
 }  // namespace keygrant::detail

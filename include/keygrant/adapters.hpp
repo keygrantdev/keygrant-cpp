@@ -1,6 +1,6 @@
-// The adapters: all platform I/O the SDK does lives behind these interfaces
-// (sdk/src/types.ts), each with a default. An app replaces any of them, and
-// tests replace all of them.
+// The adapters: all platform I/O the SDK does lives behind these interfaces,
+// each with a default. An app replaces any of them, and tests replace all of
+// them.
 //
 // Adapters may be called from more than one thread: a call behind one that is
 // stuck in an adapter runs read-only beside it, and the SDK bounds the HTTP
@@ -70,7 +70,8 @@ struct DeviceIdentity {
   std::optional<std::string> fingerprint;
   /// What `fingerprint` hashes. Only a seat keyed by a machine id is held to its device.
   std::optional<DeviceKind> kind;
-  /// Fingerprints this device has had besides it (the host-name one it had before the machine id).
+  /// Other fingerprints this device answers to (such as the host-name
+  /// fingerprint).
   std::vector<std::string> alternates;
 
   bool operator==(const DeviceIdentity& other) const {
@@ -199,7 +200,7 @@ class WindowsRegistryStash final : public RegistryStash {
 /** Options for CurlHttp. */
 struct CurlHttpOptions {
   /// Sent as `User-Agent`.
-  std::string userAgent = "keygrant-cpp/0.1";
+  std::string userAgent = "keygrant-cpp/0.2";
   /// A body larger than this is no answer (a portal page, a hostile endpoint).
   std::size_t maxBodyBytes = 1024 * 1024;
   /// A CA bundle to verify TLS with, instead of the system's.

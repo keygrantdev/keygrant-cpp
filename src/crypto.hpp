@@ -1,5 +1,5 @@
-// The lease's cryptography (shared/src/crypto.ts): base64url as the reference
-// decodes it, SHA-256, and Ed25519 signature checks over OpenSSL 3.
+// The lease's cryptography: base64url as the reference decodes it, SHA-256, and
+// Ed25519 signature checks over OpenSSL 3.
 #pragma once
 
 #include <cstddef>
@@ -16,9 +16,9 @@ namespace keygrant::detail {
 using Bytes = std::vector<unsigned char>;
 
 /**
- * CANONICAL base64url, as the reference's b64urlDecode reads a token's parts:
- * the URL-safe alphabet only, no padding, and no stray bits (encoding the
- * result gives the input back). None for anything else.
+ * CANONICAL base64url, as the server's verifier reads a token's parts: the
+ * URL-safe alphabet only, no padding, and no stray bits (encoding the result
+ * gives the input back). None for anything else.
  */
 std::optional<Bytes> base64UrlDecode(std::string_view input);
 
@@ -32,6 +32,9 @@ std::optional<Bytes> base64Forgiving(std::string_view input);
 /// base64url without padding.
 std::string base64UrlEncode(const unsigned char* data, std::size_t size);
 std::string base64UrlEncode(std::string_view bytes);
+
+/// The SHA-256 of the bytes (32 bytes).
+Bytes sha256(std::string_view bytes);
 
 /// Lowercase hex SHA-256 of the bytes.
 std::string sha256Hex(std::string_view bytes);

@@ -1,6 +1,5 @@
-// A License over the default storage (sdk/src/storage.test.ts): storage that
-// cannot be read, calls behind a stuck read, and saves from more than one
-// process or instance of the app on the same file.
+// A License over the default storage: storage that cannot be read, calls behind a stuck read, and
+// saves from more than one process or instance of the app on the same file.
 #include <future>
 
 #include "memory_fs.hpp"
@@ -138,7 +137,7 @@ TEST(StorageBehindAStuckCall, TheUpgradeLinkIsMadeFromAnOlderSdksStateWithoutCop
   EXPECT_TRUE(memory->changes().empty());
 }
 
-/** The engine's own save (engine.ts `save`), as one process makes it through the storage's update(). */
+/** The engine's own save, as one process makes it through the storage's update(). */
 void save(FileStorage& storage, const keygrant::detail::StatePatch& patch, const keygrant::detail::Basis& basis = {}) {
   storage.update([&](const StoredState& latest) {
     StoredState next = keygrant::detail::merged(latest, patch, basis);

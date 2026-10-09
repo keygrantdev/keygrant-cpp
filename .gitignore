@@ -1,4 +1,4 @@
-# Native builds (scripts/test-windows.ps1, or by hand), and everything vcpkg
-# fetches, builds or caches for them (build-vcpkg/).
+# Native builds, and everything vcpkg fetches, builds or caches for them
+# (build-vcpkg/).
 /build/
 /build-*/

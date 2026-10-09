@@ -1,7 +1,6 @@
-// Files in memory, as one or more processes see them (sdk/src/storage.test.ts
-// `memoryFs`): failures queued per operation or given every time, an operation
-// held until released, something another process does just before an
-// operation, each file's mtime, every operation in order, and every change.
+// Files in memory, as one or more processes see them: failures queued per operation or given every time, an operation
+// held until released, something another process does just before an operation, each file's mtime, every operation in
+// order, and every change.
 #pragma once
 
 #include <deque>

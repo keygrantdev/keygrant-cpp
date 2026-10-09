@@ -1,4 +1,4 @@
-// HTTP over libcurl, every call bounded (sdk/src/adapters.ts fetchHttp).
+// HTTP over libcurl, every call bounded.
 #include <curl/curl.h>
 
 #include <algorithm>
@@ -100,7 +100,7 @@ bool isHttps(const std::string& url) { return url.size() > 8 && detail::asciiLow
 CurlHttp::CurlHttp() : CurlHttp(CurlHttpOptions{}) {}
 
 CurlHttp::CurlHttp(CurlHttpOptions options) : options_(std::move(options)) {
-  // Here, on the app's thread, not lazily on the worker a call runs on.
+  // Here, on the app's thread, not lazily on the worker thread a call runs on.
   (void)detail::ensureCurlGlobal();
 }
 

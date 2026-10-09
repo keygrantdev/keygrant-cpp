@@ -119,6 +119,23 @@ std::optional<TrialBody> parseTrialBody(const json& body) {
   return out;
 }
 
+ClaimBody parseClaimBody(const json& body) {
+  ClaimBody out;
+  if (!body.is_object()) return out;
+  const auto text = [&body](const char* name) -> std::optional<std::string> {
+    const auto it = body.find(name);
+    if (it == body.end() || !it->is_string()) return std::nullopt;
+    return it->get<std::string>();
+  };
+  out.key = text("key");
+  out.activationId = text("activationId");
+  out.lease = text("lease");
+  const auto pending = body.find("pending");
+  out.pending = pending != body.end() && pending->is_boolean() && pending->get<bool>();
+  if (std::optional<std::string> error = text("error"); error && !error->empty()) out.error = std::move(error);
+  return out;
+}
+
 std::optional<std::int64_t> earliest(std::initializer_list<std::optional<std::int64_t>> values) {
   std::optional<std::int64_t> out;
   for (const auto& value : values) {

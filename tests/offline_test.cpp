@@ -1,4 +1,4 @@
-// The decisions made from what the device holds (sdk/src/offline.test.ts).
+// The decisions made from what the device holds.
 #include "clock.hpp"
 #include "offline.hpp"
 #include "support.hpp"

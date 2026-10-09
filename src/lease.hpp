@@ -1,5 +1,5 @@
-// A KeyGrant lease: a compact JWS (EdDSA over Ed25519) whose payload carries
-// these claims (shared/src/lease.ts), verified offline (shared/src/crypto.ts).
+// A KeyGrant lease: a compact JWS (EdDSA over Ed25519) whose payload carries these claims, verified
+// offline.
 #pragma once
 
 #include <cstdint>
@@ -47,15 +47,13 @@ struct VerifyResult {
 };
 
 /**
- * `ent` as a verifier reads it (docs/specs/sdk-contract.md section 2.1;
- * shared/src/lease.ts entitlementsOf): an object's flag, number and text
- * members, kept as they are (a number as a double); every other member (an
- * object, a list, null) dropped; and nothing at all from anything but an
- * object (null, a list, a text, a number, a flag). Never a refusal: a lease
- * that verifies is the server's word, and one malformed entitlement must not
- * take away the licence it rides on, or the entitlements beside it. Names are
- * kept as they are, `__proto__` and any other, and no cap the server keeps
- * (how many, how long) is enforced: the signature already vouches for them.
+ * `ent` as a verifier reads it: an object's flag, number and text members, kept as they are (a
+ * number as a double); every other member (an object, a list, null) dropped; and nothing at all
+ * from anything but an object (null, a list, a text, a number, a flag). Never a refusal: a lease
+ * that verifies is the server's word, and one malformed entitlement must not take away the licence
+ * it rides on, or the entitlements beside it. Names are kept as they are, `__proto__` and any
+ * other, and no cap the server keeps (how many, how long) is enforced: the signature already
+ * vouches for them.
  */
 std::map<std::string, Entitlement> entitlementsOf(const json& raw);
 
@@ -63,9 +61,8 @@ std::map<std::string, Entitlement> entitlementsOf(const json& raw);
 json entitlementsJson(const std::map<std::string, Entitlement>& entitlements);
 
 /**
- * The claims of a payload, checked as the reference's zod schema checks them
- * (shared/src/lease.ts LeaseClaims): none when any is missing or wrong.
- * Unknown claims are ignored, and `ent` is read leniently (entitlementsOf).
+ * The claims of a payload, checked as the server's claims schema checks them: none when any is
+ * missing or wrong. Unknown claims are ignored, and `ent` is read leniently (entitlementsOf).
  */
 std::optional<LeaseClaims> parseClaims(const json& payload);
 

@@ -1,5 +1,5 @@
-// What the tests share: a signing key, leases as the reference signs them, the
-// conformance vectors, and fake adapters (sdk/src/license.test.ts `harness`).
+// What the tests share: a signing key, leases as the reference signs them, the conformance vectors,
+// and fake adapters.
 #pragma once
 
 #include <gtest/gtest.h>
@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
+#include <future>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -35,6 +36,16 @@ using keygrant::LicenseState;
 using keygrant::LicenseStatus;
 using keygrant::StoredState;
 using Millis = std::chrono::milliseconds;
+
+/**
+ * Waits for a call left running on another thread (a call stuck on its read, let go just before) to finish,
+ * so the harness it uses outlives it. What it answers is not what the tests using this check: each asserts
+ * what the License did while that call was stuck. So its result is dropped, on purpose.
+ */
+template <typename T>
+void finish(std::future<T>& running) {
+  (void)running.get();
+}
 
 inline constexpr std::int64_t NOW = 1'757'000'000'000;
 inline constexpr std::int64_t DAY = 86'400'000;
@@ -69,7 +80,7 @@ class TestKey {
   std::shared_ptr<evp_pkey_st> key_;
 };
 
-/** A lease's input, as the reference's signLease takes it. */
+/** A lease's input, as the server's signer takes it. */
 struct LeaseSpec {
   std::string sub = KEY;
   std::string product = PRODUCT;
@@ -83,7 +94,7 @@ struct LeaseSpec {
   ordered_json extra = ordered_json::object();
 };
 
-/** The claims signLease makes of a spec: iat = floor(now / 1000), exp = iat + ttl. */
+/** The claims a spec signs: iat = floor(now / 1000), exp = iat + ttl. */
 ordered_json claimsOf(const LeaseSpec& spec);
 
 /// The `fp` claim of a fingerprint.
@@ -134,6 +145,11 @@ class MemoryStorage final : public keygrant::StorageAdapter {
   std::atomic<bool> failReads{false};
   /// The next read fails, and only that one (a file an antivirus scan holds for a moment).
   std::atomic<bool> failNextRead{false};
+  /**
+   * Another process's save between two reads: the `nth` read from now (1 is
+   * the next) first finds `state` stored.
+   */
+  void storeBeforeRead(int nth, std::optional<StoredState> state);
   void releaseAll();
 
  private:
@@ -142,6 +158,8 @@ class MemoryStorage final : public keygrant::StorageAdapter {
   std::atomic<int> writes_{0};
   std::atomic<bool> hangRead_{false};
   std::atomic<bool> holdWrite_{false};
+  int storeAt_ = 0;
+  std::optional<StoredState> storeBefore_;
   Gate readGate_;
   Gate writeGate_;
 };
@@ -154,6 +172,8 @@ class MemoryRegistry final : public keygrant::RegistryStash {
   void set(std::optional<std::int64_t> value);
   std::atomic<bool> failReads{false};
   std::atomic<bool> failWrites{false};
+  /// How many times the stash was read.
+  std::atomic<int> reads{0};
 
  private:
   std::mutex mutex_;
@@ -193,6 +213,23 @@ class FakeFingerprinter final : public keygrant::Fingerprinter {
   Gate gate_;
 };
 
+/**
+ * A fingerprinter whose machine id never reads (no own fingerprint, the host
+ * name as an alternate), recording the timeout each identify() is given: what
+ * pins the bound a call reads the device for.
+ */
+class TimedId final : public keygrant::Fingerprinter {
+ public:
+  std::string get() override { return "unused"; }
+  std::optional<keygrant::DeviceIdentity> identify(Millis timeout) override;
+  /// Every timeout identify() was given, in order.
+  std::vector<Millis> timeouts();
+
+ private:
+  std::mutex mutex_;
+  std::vector<Millis> timeouts_;
+};
+
 /** HTTP answered by a handler per action, recording every call. */
 class FakeHttp final : public keygrant::HttpAdapter {
  public:
@@ -207,6 +244,8 @@ class FakeHttp final : public keygrant::HttpAdapter {
   int count(const std::string& action);
   /// The body of the first `action` call (a test failure when there was none).
   json bodyOf(const std::string& action);
+  /// The body of every `action` call, in order.
+  std::vector<json> bodiesOf(const std::string& action);
   std::vector<std::string> actions();
   std::vector<Millis> timeouts();
   /// Wait until `action` has been called `times` times.
@@ -262,6 +301,12 @@ class Harness {
   std::string sign(const std::string& sub, const std::string& model, std::int64_t ttlSeconds,
                    std::int64_t now = NOW) const;
   std::string sign(const LeaseSpec& spec) const;
+
+  /**
+   * Whether the launch report the License has in flight, if any, settled
+   * within `timeout` (the engine's test hook, not public API).
+   */
+  bool reportSettled(Millis timeout = Millis{10'000});
 
   std::optional<StoredState> stored() { return storage->get(); }
   void store(std::optional<StoredState> state) { storage->set(std::move(state)); }

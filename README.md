@@ -1,10 +1,9 @@
 # KeyGrant for C++
 
-Licensing for native desktop apps (Qt, wxWidgets, JUCE, plain Win32, Cocoa or
-GTK): a licence is proven to the app by a signed lease (a JWT, EdDSA over
-Ed25519) that the SDK verifies **offline** against your product's public key.
-The app only talks to KeyGrant to activate, to renew a lease near or past its
-end, or to report a newer major version.
+Licensing for native desktop apps (Qt, wxWidgets, JUCE, plain Win32, Cocoa or GTK): a licence is proven to the app by a
+signed lease (a JWT, EdDSA over Ed25519) that the SDK verifies **offline** against your product's public key. The app
+only talks to KeyGrant to activate, to renew a lease near or past its end, to report a newer major version, to pick up a
+key bought through `purchaseUrl()`, or to report a running trial's launch (at most once a day).
 
 The rule every line of it serves: **licensing failure fails in favour of the
 paying customer.** An outage, no network, a timeout, a 5xx, a 429, an ambiguous
@@ -13,27 +12,14 @@ licence away while the device holds a valid lease. Only an explicit verdict
 from the server (revoked, upgrade or update required, another device) or the
 lease's own end does.
 
-This is a port of the Electron SDK (`@keygrant/electron`, the reference), held to the same
-behaviour by KeyGrant's SDK contract and by every answer in
-`conformance/vectors.json` (34 groups, 583 vectors: every one replayed by the suite). The full
-guide is at https://keygrant.dev/docs.
+This is a port of the Electron SDK (`@keygrant/electron`, the reference), held to the same behaviour by every answer in
+`conformance/vectors.json` (every vector is replayed by the suite but the `majors` fractions, which no `std::int64_t`
+major can hold). The full guide is at https://keygrant.dev/docs.
 
 - C++17, one CMake target: `keygrant::keygrant` (static by default; `BUILD_SHARED_LIBS` honoured).
 - Depends on OpenSSL 3 (Ed25519, SHA-256), libcurl (HTTP) and nlohmann/json (private: never in a public header).
-- Windows, macOS and Linux. What has been compiled and tested where:
-  - **Linux** (Debian 12, GCC 12, x86-64): `-Werror`, every test; again under AddressSanitizer and
-    UndefinedBehaviorSanitizer, and under ThreadSanitizer; an app's project over the installed static package and
-    over the source tree built shared.
-  - **Windows** (Windows 11, MSVC 14.44 from the Visual Studio 2022 Build Tools, x64): `/W4 /WX`, every test, as a
-    static library over the static CRT and as a DLL, dependencies from vcpkg. The
-    Windows code runs in those tests against this machine: the `MachineGuid` read (`RegGetValueW`, checked against
-    what `reg query` prints), the trial stash in HKCU, the Win32 file replacement, flushes and folders,
-    `GetHostNameW`, and libcurl over Schannel. Compiled but not run here: the `RegOpenKeyExW` fallback (for a
-    Windows without `RRF_SUBKEY_WOW6464KEY`, before Windows 8) and `SHGetKnownFolderPath` (taken only when
-    `%LOCALAPPDATA%` or `%USERPROFILE%` is missing).
-  - **macOS** (macOS 14.2, Apple Clang 15 from Xcode 15.1, arm64, dependencies from vcpkg): `-Werror`, every
-    test, 363 of 363, including the IOKit read, `F_FULLFSYNC`, `st_mtimespec` and the Application Support folder.
-    Run by hand on 2026-10-06.
+- Windows, macOS and Linux: MSVC 2022 (`/W4 /WX`, as a static library over the static CRT or as a DLL), Apple Clang 15
+  or later and GCC 12 or later (`-Werror`).
 
 ## Install
 
@@ -43,7 +29,7 @@ guide is at https://keygrant.dev/docs.
 include(FetchContent)
 FetchContent_Declare(keygrant
   GIT_REPOSITORY https://github.com/keygrantdev/keygrant-cpp.git
-  GIT_TAG        0.1.0)
+  GIT_TAG        0.2.0)
 FetchContent_MakeAvailable(keygrant)
 
 target_link_libraries(my_app PRIVATE keygrant::keygrant)
@@ -53,7 +39,7 @@ or, with the repository vendored, `add_subdirectory(third_party/keygrant)`. Buil
 SDK builds no tests and never adds `-Werror` to your build.
 
 OpenSSL 3, libcurl and nlohmann/json must be findable by `find_package`. Installed (`cmake --install`), the SDK
-is a package: `find_package(keygrant 0.1 REQUIRED)` (a static install finds OpenSSL and CURL again for you).
+is a package: `find_package(keygrant 0.2 REQUIRED)` (a static install finds OpenSSL and CURL again for you).
 
 ### vcpkg (Windows, macOS)
 
@@ -81,7 +67,7 @@ keygrant::LicenseConfig config;
 config.product = "sluice";                          // your product's slug
 config.apiBaseUrl = "https://api.keygrant.dev";
 config.publicJwk = R"({"kty":"OKP","crv":"Ed25519","x":"..."})";  // see "Embedding the public key"
-config.major = 3;                                   // this build's major version
+config.major = 3;                                   // this build's major version (a 0.x build: 0, read as 1)
 config.deviceName = "Rae's MacBook";                // optional, shown in the device list
 
 keygrant::License license(config);                  // throws std::invalid_argument on a bad config
@@ -156,13 +142,79 @@ come from any number of threads (below).
   one, or a device refusal that stands for this one) is dropped here without asking KeyGrant to release it, which
   would lock that PC out; `released` is then `true`, as this device held no seat. Throws `keygrant::StalledError`
   behind a stuck call (nothing released or dropped), and the storage's exception.
-- `startTrial()`: never throws. A trial runs only while its trial lease (signed by KeyGrant to the trial's own end)
+- `startTrial()`: never throws. The device is read once for everything it asks. With no key held and a purchase secret
+  held (`purchaseUrl`, below), the key bought with it is asked for first, always, bounded by 5 s: bought, it is the
+  answer (`Licensed`) and no trial is asked. A trial runs only while its
+  trial lease (signed by KeyGrant to the trial's own end)
   is valid: the end stored beside it is unsigned, and editing it extends nothing. An answer whose trial lease this
   build cannot verify (signed with a key the product rotated to ahead of this build, say) never replaces a stored one
   it can, which would end a running trial; an answer with no lease (the trial is over) is taken as it is. A trial the
   disk refused is kept for this process and saved by the next call that can.
 - `upgradeUrl(paymentLink)`: your Stripe payment link with `client_reference_id` set to this device's
   **activation id** (never the key), or `std::nullopt` with no activation. An upgrade sale finds the key through it.
+- `purchaseUrl(paymentLink)`: your Stripe payment link with `client_reference_id` set to the reference to this
+  install's one-time purchase secret, or `std::nullopt` while any key is held (below).
+
+Both links are built one way: the link's own parameters are kept as written and in their order, any
+`client_reference_id` already on it is replaced, and the fragment is kept. Both throw `std::invalid_argument` for a
+link that is not an absolute URL.
+
+### Buying from the app: no key to type
+
+Give a customer who holds no key a Buy button that opens your Stripe Payment Link through `purchaseUrl`. When they
+come back to the app, the key they bought is picked up and this device activated on it, with nothing typed:
+
+```cpp
+bool checkoutOpened = false;
+if (const std::optional<std::string> url = license.purchaseUrl("https://buy.stripe.com/your-link")) {
+  openInBrowser(*url);   // QDesktopServices::openUrl, ShellExecuteW, NSWorkspace openURL, ...
+  checkoutOpened = true; // url is std::nullopt while a key is held: use upgradeUrl() for an upgrade
+}
+
+// When the customer is back (the window regains focus, say), off the UI thread, and only while a
+// checkout is open: refresh() on a licensed install validates online every time.
+if (checkoutOpened && license.status().state != keygrant::LicenseState::Licensed) {
+  const keygrant::LicenseStatus status = license.refresh();   // Licensed once the checkout has gone through
+  if (status.state == keygrant::LicenseState::Licensed) checkoutOpened = false;
+}
+```
+
+- **How:** `purchaseUrl` keeps a one-time secret for this install (256 random bits from OpenSSL's CSPRNG, never the
+  device's fingerprint) and sets the link's `client_reference_id` to a hash of it, so a link that leaks (browser
+  history, a screenshot) claims nothing. The checkout keeps that reference on the key it mints, and the SDK asks
+  for the key with the secret: at once on `refresh()` or `startTrial()`, and from `status()` at most every five
+  minutes for a day after the link, bounded by 5 s (after that, `refresh()` or `startTrial()` still ask). `status()`
+  and `refresh()` ask only under this machine's own fingerprint; `startTrial()` falls back to the host name as an
+  activation does. Until the key is bought, the status is what it was (the trial, or `Unlicensed`).
+- **Turn the product's "Converts in place" switch on** once your app uses `purchaseUrl`: it is off by default, and
+  until it is on every pickup is refused and the customer types the key from the delivery email. Know the trade
+  before you do: whoever opens a checkout owns its pickup. Your Payment Link is public, so anyone can add a
+  `client_reference_id` of their own to it and get buyers to pay through their copy of the link; the key bought that
+  way is picked up by the link's maker, not the buyer. A link from the app is the buyer's own; a leaked one claims
+  nothing, as it carries only a hash of the app's secret. A planted pickup shows in the key's history, and you can
+  free the seat for the buyer.
+- **Calling it again** hands out the same secret's link, so the key bought through either link is picked up (paying
+  twice buys two keys; the second comes by email). A secret is dropped 30 days after the last link, once its key is
+  picked up, or when the server answers that it never will be (the product's "Converts in place" switch is off, or
+  another device took it): the customer then types the key from the delivery email. An activation and a
+  deactivation drop it too. A drop is this device's alone: it revokes nothing on the server.
+- **It throws** `std::invalid_argument` for a link that is not an absolute URL (before anything is read), the
+  storage's exception when the state cannot be read or the secret cannot be saved (a link whose secret is lost could
+  never be picked up), and `std::runtime_error` when the CSPRNG cannot give a new secret. Behind a call that has not finished it hands out a held secret's link as it is, and throws
+  `keygrant::StalledError` when none is held.
+
+### Trials: what the app calls
+
+```cpp
+keygrant::LicenseStatus status = license.status();
+if (status.state == keygrant::LicenseState::Unlicensed) status = license.startTrial();   // begins the trial, once
+```
+
+A running trial reports its launch to KeyGrant by itself: `status()` sends it at most once a day, on a thread of its
+own, answering without waiting for the request and never failing offline (it saves the day's stamp first), so the
+dashboard's trial funnel sees the trial come back.
+The app does not need to call `startTrial()` on every launch for that. `startTrial()` still re-syncs the trial when
+called: a change to the trial's length or entitlements reaches a running trial there.
 
 ## Configuration
 
@@ -171,7 +223,7 @@ come from any number of threads (below).
 | `product` | (required) | Your product's slug. |
 | `apiBaseUrl` | (required) | `https://api.keygrant.dev`. |
 | `publicJwk` | (required) | Your product's public key: the JWK JSON, or its bare `x`. A private key is refused. |
-| `major` | `1` | This build's major version, 1 to 99999. Set it: a key's coverage is judged by it. |
+| `major` | `1` | This build's major version, at most 99999. Set it: a key's coverage is judged by it. Read as KeyGrant's server reads a version: a 0.x build (`major = 0`) is major 1, and so is anything below 1. |
 | `deviceName` | none | Shown in the customer's device list; cut to 120 UTF-16 units. |
 | `deviceHold` | `true` | Whether a licence is held to its device (below). |
 | `httpTimeout` | 15 s | How long any request may take; the SDK holds every request to it itself. |
@@ -213,8 +265,7 @@ const bool pro = edition != status.entitlements.end() && edition->second == "pro
 - **Present** on a `Licensed` status, from the licence's lease (read offline, or the lease an activation, a renewal or
   `refresh()` brought), and on a `Trial` status, from the trial's lease; a `stalled` answer carries them too, from the
   lease stored. **Empty** on every other status (`Expired`, `Invalid` for any reason, a stored refusal included,
-  `Unknown`, `Unlicensed`), and when the lease grants none: a status from such a lease is equal to what it was before
-  entitlements were read.
+  `Unknown`, `Unlicensed`), and when the lease grants none.
 - A `keygrant::Entitlement` is exactly one of a flag, a number or a text. A number is a `double`, so 5 and 5.0 are the
   same entitlement. `kind()`, `isFlag()`, `isNumber()` and `isText()` say which; `flag()`, `number()` and `text()`
   read it (`std::nullopt` for another kind). It compares by kind and value, a literal included (`== "pro"`, `== 5`,
@@ -253,7 +304,8 @@ before, once. `keygrant::serializeState`/`parseState` give the format to a stora
 ## Threading
 
 - Calls on one `License` run **one at a time**, from any number of threads.
-- A call waits for the one before it, but not past that call's HTTP bound plus 15 s from when it started. Past
+- A call waits for the one before it, but not past that call's HTTP bound plus 15 s from when it started (5 s more
+  after a `startTrial()`, which may ask twice: the purchase claim, then the trial). Past
   that (an adapter stuck on a dead disk, say), it runs **read-only**: it answers from what is stored, asks nothing,
   writes nothing, and says `stalled`. `activate()` read-only is `Network`; `deactivate()` throws `StalledError`.
 - Every request, fingerprint and machine-id read is held to its bound by running it on a thread of its own, which
@@ -263,10 +315,15 @@ before, once. `keygrant::serializeState`/`parseState` give the format to a stora
   on that read (for its own bound) instead of starting another, so a read that never ends (a hung filesystem, a
   filter driver, a custom fingerprinter that hangs) costs one thread, not one more on every `status()`.
 - Destroying a `License` while a call is stuck in an adapter is safe: that call finishes on its own.
+- A running trial's launch report (below) is sent on a **thread of its own**, which the `status()` that started it
+  never waits for. That thread holds what it uses (the device reader with its fingerprinter, and the HTTP adapter,
+  each by `shared_ptr`), never the `License` itself, until the report settles, within about 8 s (up to 3 s for the
+  device: its 2 s and the 1 s an `identify()` is given past it; 5 s for the request), so destroying the `License`
+  first is safe; the fingerprinter and the HTTP adapter are then called from that thread too.
 - Adapters may therefore be called from several threads at once, and must be thread-safe. The defaults are.
-- An abandoned adapter call may still be running when the process exits, so a custom adapter should keep what it
-  uses in its own object (the SDK holds adapters by `shared_ptr` for as long as a call runs), not in statics that
-  are destroyed at exit.
+- An abandoned adapter call, or a launch report in flight, may still be running when the process exits, so a custom
+  adapter should keep what it uses in its own object (the SDK holds adapters by `shared_ptr` for as long as a call
+  runs), not in statics that are destroyed at exit.
 
 ## Adapters
 
@@ -310,14 +367,13 @@ vcpkg, the manifest's `tests` feature: `-DVCPKG_MANIFEST_FEATURES=tests`) and tr
 errors; inside your project it does neither. The tests read `conformance/vectors.json`
 (`KEYGRANT_VECTORS` overrides the path).
 
-The suite (363 tests on Linux; 370 on Windows, which adds the registry stash's seven and skips two POSIX-only
-ones): every conformance group replayed as the reference answers it, 34 groups and 583 vectors, each
-from the pure function the engine itself calls; the engine against fake adapters (a fake clock, in-memory storage,
-scripted HTTP, a fixed fingerprinter), with server bodies nested 400,000 deep; the file storage against an
-in-memory file system that fails, holds and interleaves on demand, and against the real one; the machine id's
-parsing for every platform, and this machine's own id against what `reg query` (Windows) or `/etc/machine-id`
-(Linux) says; the Windows stash against the real registry, under a root of the tests' own; and libcurl against
-servers on 127.0.0.1, plain and TLS (a certificate no system trusts, CA-issued leaves whose revocation cannot be
+The suite: every conformance group replayed as the reference answers it (all but the `majors` fractions, which only the
+reference's JavaScript number can hold), each from the pure function the engine itself calls; the engine against fake
+adapters (a fake clock, in-memory storage, scripted HTTP, a fixed fingerprinter), with server bodies nested 400,000
+deep; the file storage against an in-memory file system that fails, holds and interleaves on demand, and against the
+real one; the machine id's parsing for every platform, and this machine's own id against what `reg query` (Windows) or
+`/etc/machine-id` (Linux) says; the Windows stash against the real registry, under a root of the tests' own; and libcurl
+against servers on 127.0.0.1, plain and TLS (a certificate no system trusts, CA-issued leaves whose revocation cannot be
 checked, redirects), on Linux and Windows alike.
 
 ## Parity with the reference
@@ -325,8 +381,8 @@ checked, redirects), on Linux and Windows alike.
 Where this SDK differs from the Electron SDK, and why:
 
 - **Bad configuration throws at construction** (`std::invalid_argument`): a JWK that is not an Ed25519 public key
-  (a private one included), an empty or path-like `product`, an `apiBaseUrl` that is not http(s), a `major` outside
-  1..99999 (the server refuses any other in every request), a non-positive `httpTimeout`. The reference takes
+  (a private one included), an empty or path-like `product`, an `apiBaseUrl` that is not http(s), a `major` above
+  99999 (the server refuses one in every request), a non-positive `httpTimeout`. The reference takes
   anything and fails every call later. The JWK's `x` is read leniently (padding, the standard alphabet).
 - **The machine id is read through the OS API, not a command**: `RegGetValueW` (`RRF_SUBKEY_WOW6464KEY`, falling
   back to `RegOpenKeyExW` with `KEY_WOW64_64KEY`) instead of `reg.exe`; IOKit (`IOServiceGetMatchingService`,
@@ -345,16 +401,16 @@ Where this SDK differs from the Electron SDK, and why:
   (`"\ud800"`) or a number past a double's range (`1e400`) is `bad-claims` here, where the reference's `JSON.parse`
   reads the first as a string and the second as `Infinity`, and keeps such an entitlement. The server never signs
   either: its signer refuses an entitlement name or text with a lone surrogate, and an entitlement number that is not
-  finite (contract 2.1), and every other claim is one it writes itself.
-- **The state file**: a leading byte-order mark is accepted (the reference sets such a file aside as corrupt); a
-  known field of the wrong JSON type, or with a value this SDK does not know (a newer SDK's refusal or device
-  kind), is read as absent; JSON that is not an object is no state. Fields this SDK does not know, and those values
-  it cannot read, are kept and written back as they were, as the reference keeps them, until this SDK writes or
-  clears the field itself. There is no default migration from `<cwd>/.keygrant/` (no C++ SDK ever wrote there;
-  `FileStorageOptions::migrateFrom` exists).
-- **Windows file replacement** is `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`, the call
-  Node's `rename` makes, rather than `ReplaceFileW`, which fails when the target does not exist yet. Win32 errors
-  are named as libuv names them (a sharing violation is `EBUSY`), so the retry rules read the same.
+  finite, and every other claim is one it writes itself.
+- **The state file**: a leading byte-order mark is accepted (the reference sets such a file aside as corrupt); a known
+  field of the wrong JSON type, or with a value this SDK does not know (a newer SDK's refusal or device kind), is read
+  as absent; JSON that is not an object is no state. Fields this SDK does not know, and those values it cannot read, are
+  kept and written back as they were, as the reference keeps them, until this SDK writes or clears the field itself.
+  There is no default migration from `<cwd>/.keygrant/`, the legacy location older Electron SDK versions used
+  (`FileStorageOptions::migrateFrom` exists).
+- **Windows file replacement** is `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`, the call Node's
+  `rename` makes, rather than `ReplaceFileW`, which fails when the target does not exist yet. Win32 errors are named as
+  libuv names them (a sharing violation is `EBUSY`), so the retry rules read the same.
 - **POSIX permissions**: the state file is created 0600 and its folders 0700 (the reference: the umask's default).
 - **HTTP**: a 307 or 308 is followed as fetch follows it (the method and the body kept, at most 20), but only to
   `https`; fetch would also follow one to plain http, and a 301, 302 or 303 as a GET, which this SDK answers as
@@ -366,15 +422,18 @@ Where this SDK differs from the Electron SDK, and why:
   is moved, never copied; a value in the state file this SDK cannot read is kept only while it nests 64 deep or
   less (an unknown field nested deeper is dropped at the next save, rather than overflow the stack).
 - **Bounds are threads**: where the reference races a promise against a timer, this SDK runs the adapter call on a
-  detached thread and stops waiting for it; the abandoned call finishes on its own. A fingerprinter or machine-id
+  detached thread and stops waiting for it; the abandoned call finishes on its own. The launch report, a promise the
+  reference never awaits, is a detached thread here too. A fingerprinter or machine-id
   read still running is waited on by the next call, not started again beside it (a promise costs nothing to
   abandon; a thread does).
 - **Never throws from `status()`/`refresh()`/`startTrial()`** for anything, not only storage: an unexpected
   exception (a custom clock that throws, say) is answered `Unknown`/`Storage`. The reference would reject.
 - **`WindowsRegistryStash`** is an opt-in default the reference does not ship (Electron apps inject their own); it
-  keeps the one stash format the contract gives every SDK.
-- **`upgradeUrl`** handles the link with a small URL routine, not a full WHATWG parser: the query is re-serialized
-  as `URLSearchParams` serializes it and the scheme and host are lower-cased; ports and paths are left as given.
+  keeps the one stash format every KeyGrant SDK shares.
+- **`upgradeUrl` and `purchaseUrl`** read the link with a small URL routine, not a full WHATWG parser: the scheme and
+  an http(s) host are lower-cased, and the query and fragment get the percent-encoding the WHATWG parser gives them;
+  a default port, a path and an international host are left as given (the parser would drop the port, normalize the
+  path and write the host in Punycode).
 - `LicenseStatus::test` and `stalled` are `bool` (false where the reference leaves them out); `trialDaysLeft` and
   `trialEndsAt` are `std::optional`; `entitlements` is a `std::map`, empty where the reference leaves it out, and the
   status's own copy where the reference hands out a frozen one.

@@ -1,5 +1,5 @@
-// The default storage (sdk/src/storage.test.ts): where it lives, and how it is
-// written and read so that neither a crash nor a busy disk costs a licence.
+// The default storage: where it lives, and how it is written and read so that neither a crash nor a
+// busy disk costs a licence.
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -173,11 +173,11 @@ TEST(FileStorageWrites, ClearTheTempsCrashesLeftAndNotAnotherInstancesWriteInFli
   // Another product's temp in the same folder is not this file's to clear.
   spit(dir.file("maindeck.json.3.3.other.tmp"), "{}");
   ASSERT_TRUE(age(dir.file("maindeck.json.3.3.other.tmp"), now - 2 * keygrant::kStaleTempMs));
-  // Either side of the cutoff, five seconds each way.
+  // Half the limit either side of it: a machine that stalls before the write still finds the younger young.
   spit(dir.file("sluice.json.4.4.younger.tmp"), "{}");
-  ASSERT_TRUE(age(dir.file("sluice.json.4.4.younger.tmp"), now - keygrant::kStaleTempMs + 5'000));
+  ASSERT_TRUE(age(dir.file("sluice.json.4.4.younger.tmp"), now - keygrant::kStaleTempMs / 2));
   spit(dir.file("sluice.json.5.5.older.tmp"), "{}");
-  ASSERT_TRUE(age(dir.file("sluice.json.5.5.older.tmp"), now - keygrant::kStaleTempMs - 5'000));
+  ASSERT_TRUE(age(dir.file("sluice.json.5.5.older.tmp"), now - keygrant::kStaleTempMs * 3 / 2));
 
   FileStorage(dir.file("sluice.json")).write(keyed("K"));
   EXPECT_EQ(dir.names(), (std::vector<std::string>{"maindeck.json.3.3.other.tmp", "sluice.json",

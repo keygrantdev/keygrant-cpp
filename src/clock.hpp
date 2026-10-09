@@ -1,9 +1,9 @@
-// The clock guard (anti clock-rollback), decided without I/O (sdk/src/clock.ts):
-// the time a lease is judged at, never earlier than the latest the device has
-// seen (`guardedNow`); where a lease the server has just signed brings the
-// guard back to after a clock that jumped ahead (`clockCorrection`, the
-// engine's serverNow); and the latest time seen that a save writes
-// (`savedLastSeen`, the engine's save).
+// The clock guard (anti clock-rollback), decided without I/O: the time a lease
+// is judged at, never earlier than the latest the device has seen
+// (`guardedNow`); where a lease the server has just signed brings the guard
+// back to after a clock that jumped ahead (`clockCorrection`, the engine's
+// serverNow); and the latest time seen that a save writes (`savedLastSeen`, the
+// engine's save).
 #pragma once
 
 #include <cstdint>

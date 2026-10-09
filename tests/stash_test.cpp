@@ -1,5 +1,5 @@
-// The Windows trial stash's one format (docs/specs/sdk-contract.md 5.4): what a
-// reader takes, decided on every platform, and the registry itself on Windows.
+// The Windows trial stash's one format: what a reader takes, decided on every platform, and the
+// registry itself on Windows.
 #include <cstdint>
 #include <limits>
 #include <string>

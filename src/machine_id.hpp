@@ -1,6 +1,5 @@
-// The machine id's parsing and decisions, as portable functions (tested on
-// every platform), and the read sequence over a MachineIdSource
-// (sdk/src/machine-id.ts).
+// The machine id's parsing and decisions, as portable functions (tested on every platform), and the
+// read sequence over a MachineIdSource.
 #pragma once
 
 #include <cstdint>

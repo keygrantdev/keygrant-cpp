@@ -1,6 +1,5 @@
-// The SDK's default state file: where it lives, and how it is read and written
-// so that neither a crash nor a busy disk ever costs a customer their licence
-// (sdk/src/storage.ts, storage-fs.ts).
+// The SDK's default state file: where it lives, and how it is read and written so that neither a
+// crash nor a busy disk ever costs a customer their licence.
 #pragma once
 
 #include <chrono>
@@ -103,7 +102,7 @@ struct FileStorageOptions {
 };
 
 /**
- * JSON file storage, as the reference's createFileStorage:
+ * JSON file storage, read and written as the Electron SDK does:
  *  - Read: only a MISSING file is "no state" (then the newest whole temp file a
  *    crash left, else `migrateFrom`'s state, copied once). Any other failure is
  *    tried again for about a second and then throws. A file that does not parse

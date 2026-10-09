@@ -150,6 +150,8 @@ bool StoredState::operator==(const StoredState& other) const {
          keptMajor == other.keptMajor && backoffSince == other.backoffSince && backoffMs == other.backoffMs &&
          refused == other.refused && refusedMajor == other.refusedMajor && refusedFor == other.refusedFor &&
          deviceKind == other.deviceKind && verdictAt == other.verdictAt && rev == other.rev &&
+         purchaseToken == other.purchaseToken && purchaseTokenAt == other.purchaseTokenAt &&
+         claimAskedAt == other.claimAskedAt && trialReportedAt == other.trialReportedAt &&
          otherFields == other.otherFields;
 }
 

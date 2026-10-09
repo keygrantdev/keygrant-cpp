@@ -1,5 +1,5 @@
 // Who this device is, for holding a lease to it and telling the server: as far
-// as can be told this call, and never guessed (sdk/src/device.ts).
+// as can be told this call, and never guessed.
 #pragma once
 
 #include <chrono>
@@ -57,6 +57,26 @@ Device deviceFrom(const DeviceIdentity& identity, std::optional<DeviceKind> inst
 
 /** deviceFrom, with every claim computed (fingerprintClaim). */
 Device deviceFrom(const DeviceIdentity& identity, std::optional<DeviceKind> installKind, bool deviceHold);
+
+/** The fingerprint an activation is made under, and what it hashes. */
+struct ActivationIdentity {
+  std::string fingerprint;
+  std::optional<DeviceKind> kind;
+};
+
+/**
+ * The fingerprint an activation is made under (a typed key's, or a bought
+ * key's claim), and what it hashes; or none: an activation answers `network`
+ * for the app to retry, and a claim is not asked.
+ *
+ * The device's own, given the time an activation deserves. When even that
+ * cannot be told: on an install already keyed by a machine id (`install`),
+ * nothing (a seat under the host name would read as another device to every
+ * normal run after it); otherwise the host name, so a machine whose id never
+ * reads in time can still activate. A fingerprinter with no host-name
+ * alternate (a custom get()) activates nothing.
+ */
+std::optional<ActivationIdentity> activationIdentity(const Device& here, std::optional<DeviceKind> install);
 
 /** How long a read of the device may take. */
 struct DeviceBounds {

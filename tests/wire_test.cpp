@@ -1,4 +1,4 @@
-// What goes on the wire, and the text handling under it (sdk/src/wire.ts).
+// What goes on the wire, and the text handling under it.
 #include "support.hpp"
 #include "url.hpp"
 #include "utf.hpp"
@@ -67,27 +67,51 @@ TEST(Bodies, AreReadAsTheReferenceReadsThem) {
   EXPECT_TRUE(parseJsonText("<html>").is_discarded());
 }
 
-TEST(UpgradeUrl, SetsTheParameterAsUrlSearchParamsDoes) {
-  EXPECT_EQ(withQueryParam("https://buy.stripe.com/test_abc", "client_reference_id", "act_device1"),
+TEST(ReferencedLink, EditsTheQueryAsTextTheReferenceLast) {
+  EXPECT_EQ(referencedLink("https://buy.stripe.com/test_abc", "act_device1"),
             "https://buy.stripe.com/test_abc?client_reference_id=act_device1");
-  // Its own parameters kept (re-serialized), one client_reference_id, set in place of the first.
-  EXPECT_EQ(withQueryParam("https://buy.stripe.com/x?prefilled_email=jo%40example.com&client_reference_id=old&a=1&client_reference_id=again",
-                           "client_reference_id", "act_1"),
-            "https://buy.stripe.com/x?prefilled_email=jo%40example.com&client_reference_id=act_1&a=1");
-  EXPECT_EQ(withQueryParam("https://buy.stripe.com/x?q=a+b&flag", "client_reference_id", "a b/c"),
-            "https://buy.stripe.com/x?q=a+b&flag=&client_reference_id=a+b%2Fc");
-  EXPECT_EQ(withQueryParam("https://Buy.Stripe.com", "client_reference_id", "act_1"),
-            "https://buy.stripe.com/?client_reference_id=act_1");
-  EXPECT_EQ(withQueryParam("https://buy.stripe.com/x#pay", "client_reference_id", "act_1"),
+  // Its own parameters kept as written and in their order, every client_reference_id left out, the reference last.
+  EXPECT_EQ(referencedLink("https://buy.stripe.com/x?prefilled_email=jo%40example.com&client_reference_id=old&a=1"
+                           "&client_reference_id=again",
+                           "act_1"),
+            "https://buy.stripe.com/x?prefilled_email=jo%40example.com&a=1&client_reference_id=act_1");
+  // Not re-serialized: a `+` and a part with no `=` stay as written; the reference is encoded as encodeURIComponent does.
+  EXPECT_EQ(referencedLink("https://buy.stripe.com/x?q=a+b&flag", "a b/c"),
+            "https://buy.stripe.com/x?q=a+b&flag&client_reference_id=a%20b%2Fc");
+  // The scheme and host lower-cased, an empty path written as `/`; the fragment kept, an empty one too.
+  EXPECT_EQ(referencedLink("HTTPS://Buy.Stripe.com", "act_1"), "https://buy.stripe.com/?client_reference_id=act_1");
+  EXPECT_EQ(referencedLink("https://buy.stripe.com/x#pay", "act_1"),
             "https://buy.stripe.com/x?client_reference_id=act_1#pay");
-  EXPECT_EQ(withQueryParam(" https://buy.stripe.com/x?\n", "client_reference_id", "act_1"),
-            "https://buy.stripe.com/x?client_reference_id=act_1");
+  EXPECT_EQ(referencedLink("https://buy.stripe.com/x?a=1#", "r"), "https://buy.stripe.com/x?a=1&client_reference_id=r#");
+  EXPECT_EQ(referencedLink(" https://buy.stripe.com/x?\n", "act_1"), "https://buy.stripe.com/x?client_reference_id=act_1");
 }
 
-TEST(UpgradeUrl, RefusesALinkThatIsNotAnAbsoluteUrl) {
+TEST(ReferencedLink, EncodesWhatTheUrlParserEncodesAndNothingElse) {
+  // Each answer is what a WHATWG URL parser gives (Node 22's URL, its search set).
+  EXPECT_EQ(referencedLink("https://buy.stripe.com/x?q=a b&n=\"<'>\"&e=%41#a b`", "act_1"),
+            "https://buy.stripe.com/x?q=a%20b&n=%22%3C%27%3E%22&e=%41&client_reference_id=act_1#a%20b%60");
+  EXPECT_EQ(referencedLink("https://buy.stripe.com/x?city=K\xC3\xB6ln", "act_1"),
+            "https://buy.stripe.com/x?city=K%C3%B6ln&client_reference_id=act_1");
+  EXPECT_EQ(referencedLink("https://buy.stripe.com/x?a\x01" "b", "r"),
+            "https://buy.stripe.com/x?a%01b&client_reference_id=r");
+  // encodeURIComponent leaves -_.!~*'() alone, and an http(s) URL's query then encodes its `'`.
+  EXPECT_EQ(referencedLink("https://x.test/", "a-_.!~*'()\xC3\xA9"),
+            "https://x.test/?client_reference_id=a-_.!~*%27()%C3%A9");
+  // A URL that is not http(s) keeps a `'` as it is.
+  EXPECT_EQ(referencedLink("custom:pay?it's", "r"), "custom:pay?it's&client_reference_id=r");
+}
+
+TEST(ReferencedLink, RefusesALinkThatIsNotAnAbsoluteUrl) {
   for (const char* link : {"", "buy.stripe.com/x", "/relative", "https://", "https:///path", "1http://x", "https:no-slashes"}) {
-    EXPECT_THROW(withQueryParam(link, "client_reference_id", "act_1"), std::invalid_argument) << link;
+    EXPECT_THROW(referencedLink(link, "act_1"), std::invalid_argument) << link;
+    EXPECT_THROW(absoluteLink(link), std::invalid_argument) << link;
   }
+}
+
+TEST(ClaimBodies, AreNothingWhenTheTextIsNotJson) {
+  // The parseClaimBody vectors hold every JSON body; text that is not JSON (a portal's page) is the one they cannot.
+  const ClaimBody page = parseClaimBody(parseJsonText("<html>"));
+  EXPECT_FALSE(page.key || page.activationId || page.lease || page.pending || page.error);
 }
 
 TEST(Utf8, DecodesAsTheWhatwgDecoderDoes) {

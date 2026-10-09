@@ -1,9 +1,8 @@
 // What an app's literals make of a keygrant::Entitlement, checked as it
-// compiles: as C++17, and as C++20 (scripts/in-container.sh), where char8_t
-// and the u8 literal it types exist. A narrow string literal, a number and a
-// bool are entitlements; a character, a wide, UTF-16, UTF-32 or u8 literal, an
-// enum and a null pointer are not (each would otherwise be the flag true or a
-// number).
+// compiles: as C++17, and as C++20, where char8_t and the u8 literal it types
+// exist. A narrow string literal, a number and a bool are entitlements; a
+// character, a wide, UTF-16, UTF-32 or u8 literal, an enum and a null pointer
+// are not (each would otherwise be the flag true or a number).
 #include <keygrant/keygrant.hpp>
 
 #include <cstddef>

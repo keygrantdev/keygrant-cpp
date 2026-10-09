@@ -172,19 +172,22 @@ std::string base64UrlEncode(std::string_view bytes) {
   return base64UrlEncode(reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size());
 }
 
-std::string sha256Hex(std::string_view bytes) {
+Bytes sha256(std::string_view bytes) {
   unsigned char digest[EVP_MAX_MD_SIZE];
   unsigned int length = 0;
   if (EVP_Digest(bytes.data(), bytes.size(), digest, &length, EVP_sha256(), nullptr) != 1) {
     ERR_clear_error();
     throw std::runtime_error("SHA-256 failed");
   }
+  return Bytes(digest, digest + length);
+}
+
+std::string sha256Hex(std::string_view bytes) {
   static constexpr char kHex[] = "0123456789abcdef";
   std::string out;
-  out.reserve(length * 2);
-  for (unsigned int i = 0; i < length; ++i) {
-    out.push_back(kHex[digest[i] >> 4]);
-    out.push_back(kHex[digest[i] & 0x0F]);
+  for (const unsigned char byte : sha256(bytes)) {
+    out.push_back(kHex[byte >> 4]);
+    out.push_back(kHex[byte & 0x0F]);
   }
   return out;
 }

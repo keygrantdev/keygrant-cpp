@@ -20,25 +20,6 @@ LicenseStatus unreadable() {
 
 LicenseStatus unlicensed() { return LicenseStatus{}; }
 
-/** The fingerprint an activation is made under, and what it hashes. */
-struct ActivationIdentity {
-  std::string fingerprint;
-  std::optional<DeviceKind> kind;
-};
-
-/**
- * The device's own fingerprint; when even an activation's time cannot tell it:
- * the host name, except on an install already keyed by a machine id (a seat
- * under the host name would read as another device to every normal run after
- * it), or when there is no host-name alternate (a custom get()). None is
- * answered `network`, for the app to retry.
- */
-std::optional<ActivationIdentity> activationIdentity(const Device& here, std::optional<DeviceKind> install) {
-  if (here.own) return ActivationIdentity{*here.own, here.kind};
-  if (install == DeviceKind::Machine || !here.hostname) return std::nullopt;
-  return ActivationIdentity{*here.hostname, DeviceKind::Hostname};
-}
-
 }  // namespace
 
 // --- the public calls ------------------------------------------------------
@@ -84,17 +65,25 @@ LicenseStatus Engine::startTrial() {
   LicenseStatus result;
   bool stalled = false;
   try {
-    serial([&](bool readOnly) {
-      stalled = readOnly;
-      const std::optional<StoredState> state = loadForStatus(readOnly);
-      if (!state) {
-        result = unreadable();
-      } else if (!readOnly) {
-        result = startTrialNow(*state);
-      } else {
-        result = trialStatus(*state, effectiveNow(*state));
-      }
-    });
+    // It may make two requests (a claim bounded as a status check is, then the
+    // trial ask): the calls behind it wait that much longer (serial).
+    serial(
+        [&](bool readOnly) {
+          stalled = readOnly;
+          const std::optional<StoredState> state = loadForStatus(readOnly);
+          if (!state) {
+            result = unreadable();
+          } else if (!readOnly) {
+            // The device read once, given an activation's time, for both asks.
+            const Device here = device(timings_.activateMachineId, state->deviceKind);
+            // A key bought through purchaseUrl is asked for first; bought, it is the answer, and no trial is asked.
+            const Pickup picked = pickUp(*state, PickupAsk{true, true, &here});
+            result = picked.status ? *picked.status : startTrialNow(picked.state, here);
+          } else {
+            result = trialStatus(*state, effectiveNow(*state));
+          }
+        },
+        timings_.statusCheck);
   } catch (...) {
     result = unreadable();
   }
@@ -107,7 +96,7 @@ std::optional<std::string> Engine::upgradeUrl(const std::string& paymentLink) {
   const StoredState state = load(true);
   if (!truthy(state.key) || !truthy(state.activationId)) return std::nullopt;
   // The activation id, never the key: a URL lands in browser history and logs.
-  return withQueryParam(paymentLink, "client_reference_id", *state.activationId);
+  return referencedLink(paymentLink, *state.activationId);
 }
 
 // --- what each does ----------------------------------------------------------
@@ -142,15 +131,11 @@ ActivateResult Engine::activateNow(const std::string& key) {
                                      [this](const StatePatch& patch, std::int64_t guard) { save(patch, guard); });
   const LeaseCheck evaluated = evaluate(lease, now, entered, activationId, identity->kind);
   if (!evaluated.ok) return ActivateResult::failure(ActivateError::InvalidLease);
-  StatePatch patch;
-  patch.key = Change<std::string>::set(*entered);
-  patch.activationId = Change<std::string>::set(activationId);
-  patch.lease = Change<std::string>::set(lease);
-  patch.checkedMajor = Change<std::int64_t>::set(major_);
-  patch.keptMajor = Change<std::int64_t>::of(keptWith(std::nullopt, *evaluated.claims, now, major_));
-  patch += leasedPatch();
-  // What this activation keyed the install by; none for a fingerprint of unknown kind.
-  patch.deviceKind = Change<DeviceKind>::of(identity->kind);
+  // As a bought key's claim saves one (activationPatch), the purchase secret
+  // cleared too: else a later deactivate would let a pending pickup activate
+  // the device again, on a key the customer may have meant for another machine.
+  const StatePatch patch =
+      activationPatch(Activation{*entered, activationId, lease, *evaluated.claims, now, major_, identity->kind});
   Basis basis;
   basis.activation = Asked{askedAt, activationId, stored.verdictAt};
   save(patch, std::nullopt, basis);
@@ -172,8 +157,9 @@ DeactivateResult Engine::deactivateNow() {
     const std::optional<Reply> reply = post("deactivate", body);
     result.released = reply && reply->status == 200;
   }
-  // Stamped, so that an answer to an older ask is not saved over it.
-  StatePatch patch = unkeyedPatch();
+  // Stamped, so that an answer to an older ask is not saved over it; the
+  // purchase secret goes too (noPurchasePatch), as an activation clears it.
+  StatePatch patch = unkeyedPatch() + noPurchasePatch();
   patch.verdictAt = Change<std::int64_t>::set(effectiveNow(state));
   save(patch);
   return result;
@@ -205,92 +191,11 @@ LicenseStatus Engine::statusNow(const StoredState& state, bool forceOnline, bool
   if (refused && readOnly) return invalidStatus(reasonOf(*refused), state.key);
   if (refused) return refusedStatus(state, *refused, forceOnline);
   if (truthy(state.key) && truthy(state.lease)) return licenseStatus(state, *state.lease, now, forceOnline, readOnly);
-  if (state.trialStart) return trialStatus(state, now, StatusAsk{forceOnline, readOnly});
+  // No licence held: a key bought through purchaseUrl is picked up first (pickUp), never read-only.
+  const Pickup picked = readOnly ? Pickup{std::nullopt, state} : pickUp(state, PickupAsk{false, forceOnline});
+  if (picked.status) return *picked.status;
+  if (picked.state.trialStart) return trialStatus(picked.state, now, StatusAsk{forceOnline, readOnly});
   return unlicensed();
-}
-
-LicenseStatus Engine::startTrialNow(const StoredState& state) {
-  const TrialAsk ask = askTrial(state, timings_.activateMachineId);
-  // The server's trial even when it could not be saved: kept for this process
-  // (unsaved_) until a later call saves it.
-  return trialStatus(ask.latest, effectiveNow(state));
-}
-
-/**
- * Ask the server for this device's trial (`trial`, with the earliest start the
- * device holds as `clientStart`) and save its answer: `reached` when the
- * server answered at all, `latest` the state with its trial merged in.
- */
-Engine::TrialAsk Engine::askTrial(const StoredState& state, Milliseconds machineIdTimeout,
-                                  std::optional<Milliseconds> timeout) {
-  const Device here = device(machineIdTimeout, state.deviceKind);
-  // The stash is the app's own adapter (the Windows registry, say), and it can
-  // cost nothing: one that cannot be read is no evidence, and startTrial() still answers.
-  std::optional<std::int64_t> stashed;
-  try {
-    stashed = a_.registry->readTrialStart();
-  } catch (...) {
-    stashed.reset();
-  }
-  const std::optional<std::int64_t> clientStart = earliest({state.trialStart, stashed});
-  TrialAsk ask{false, state};
-  try {
-    // A device that cannot be told this time starts no trial: as offline.
-    if (!here.own) return ask;
-    ordered_json body = ordered_json::object();
-    body["fingerprint"] = *here.own;
-    if (here.kind) body["fingerprintKind"] = to_string(*here.kind);
-    if (clientStart) body["clientStart"] = *clientStart;
-    // Stamped with when it was asked for: an older answer is not saved over it.
-    const Stamp asked{effectiveNow(state), state.trialAt};
-    const std::optional<Reply> reply = post("trial", body, timeout);
-    if (!reply) return ask;
-    ask.reached = true;
-    const std::optional<TrialBody> trial = reply->status == 200 ? parseTrialBody(reply->body) : std::nullopt;
-    if (!trial) return ask;
-    // The earliest start across all evidence: never moved forward.
-    const std::int64_t trialStart =
-        earliest({trial->trialStart, state.trialStart, stashed}).value_or(trial->trialStart);
-    // Mirrored to the stash before the save; a stash that cannot be written
-    // does not throw the server's trial away with it.
-    try {
-      a_.registry->writeTrialStart(trialStart);
-    } catch (...) {
-      // The stash is best-effort.
-    }
-    StatePatch patch;
-    patch.trialStart = Change<std::int64_t>::set(trialStart);
-    patch.trialEndsAt = Change<std::int64_t>::set(trial->trialEndsAt);
-    // A trial lease this build cannot verify (signed with a key the product
-    // rotated to ahead of this build, say) never replaces one it can: a trial
-    // runs only on a valid lease (trialStatusOf), so taking it would end a
-    // running trial. As a renewal keeps the lease it has when the answer's will
-    // not verify. An answer with no lease (the trial is over) is taken as it is.
-    const bool keepStored = keepsItsTrialLease(state, trial->lease);
-    patch.trialLease = Change<std::string>::of(keepStored ? state.trialLease : trial->lease);
-    Basis basis;
-    basis.trial = asked;
-    ask.latest = merged(state, patch, basis);
-    // The server's trial even when it could not be saved: kept for this process until a later call saves it.
-    const bool saved = saveBestEffort(patch, std::nullopt, basis);
-    std::lock_guard<std::mutex> lock(unsavedMutex_);
-    if (saved) {
-      unsaved_.reset();
-    } else {
-      unsaved_ = UnsavedTrial{patch, basis};
-    }
-  } catch (...) {
-    // Offline: whatever local trial evidence there is.
-  }
-  return ask;
-}
-
-/** Whether a trial answer's lease fails here while the stored one verifies (askTrial). */
-bool Engine::keepsItsTrialLease(const StoredState& state, const std::optional<std::string>& answered) {
-  if (!answered || !state.trialLease) return false;
-  const std::int64_t now = effectiveNow(state);
-  if (trialLease(*answered, now, state.deviceKind).valid) return false;
-  return trialLease(*state.trialLease, now, state.deviceKind).valid;
 }
 
 /**
@@ -344,78 +249,6 @@ StoredState Engine::noteKept(const StoredState& state, const LeaseClaims& claims
   return held;
 }
 
-/**
- * A trial's status from what the device holds. With `ask` (a status()), a
- * trial whose lease does not verify while its stored end is still ahead is
- * asked for again first (healTrial).
- */
-LicenseStatus Engine::trialStatus(const StoredState& state, std::int64_t now, const std::optional<StatusAsk>& ask) {
-  // Only a valid trial lease runs a trial, to the end it was signed to, with what it grants.
-  const TrialLease lease = truthy(state.trialLease) ? trialLease(*state.trialLease, now, state.deviceKind) : TrialLease{};
-  const LicenseStatus status = trialStatusOf(state, now, lease.valid, lease.endsAt, lease.entitlements);
-  const bool storedEndAhead = state.trialEndsAt && now < *state.trialEndsAt;
-  if (!ask || ask->readOnly || lease.valid || !storedEndAhead) return status;
-  return healTrial(state, ask->forceOnline).value_or(status);
-}
-
-/**
- * A trial whose lease does not verify here while its stored end is still
- * ahead: a lease signed with the product's key before it was rotated (on a
- * build that ships the new one), one from before KeyGrant signed trial leases
- * to the trial's end, or one never saved whole. The stored end is unsigned, so
- * it runs no trial on its own (trialStatusOf): the server is asked for the
- * trial again instead, under the usual waits (askDue) and bounded as a status
- * check is, and its answer stands. An ask that brings back no trial this build
- * can verify starts the wait (kRetryUnansweredMs when nothing answered,
- * kAskAgainMs when the server did), so a device that is offline, or that
- * carries a key the product no longer signs with, is not asked on every
- * status(). None when it did not ask, or nothing answered.
- */
-std::optional<LicenseStatus> Engine::healTrial(const StoredState& state, bool forceOnline) {
-  // The wait runs on the device clock, as askDue reads it.
-  const std::int64_t askedAt = clockNow();
-  if (!askDue(state, askedAt, forceOnline)) return std::nullopt;
-  const TrialAsk ask = askTrial(state, timings_.machineId, timings_.statusCheck);
-  std::optional<LicenseStatus> after;
-  if (ask.reached) after = trialStatus(ask.latest, effectiveNow(ask.latest));
-  if (after && after->state == LicenseState::Trial) return after;
-  StatePatch wait;
-  wait.backoffSince = Change<std::int64_t>::set(askedAt);
-  wait.backoffMs = Change<std::int64_t>::set(ask.reached ? kAskAgainMs : kRetryUnansweredMs);
-  saveBestEffort(wait);
-  return after;
-}
-
-/** The stored state for a status, with a trial this process could not save; none when it cannot be read. */
-std::optional<StoredState> Engine::loadForStatus(bool readOnly) {
-  std::optional<StoredState> state;
-  try {
-    state = load(readOnly);
-  } catch (...) {
-    return std::nullopt;
-  }
-  std::optional<UnsavedTrial> unsaved;
-  {
-    std::lock_guard<std::mutex> lock(unsavedMutex_);
-    unsaved = unsaved_;
-  }
-  // As a save would merge it: a newer trial answer stored since wins.
-  if (unsaved) return merged(*state, unsaved->patch, unsaved->basis);
-  return state;
-}
-
-/** Save the trial this process could not, and forget it once saved. Best-effort. */
-void Engine::saveUnsavedTrial() {
-  std::optional<UnsavedTrial> unsaved;
-  {
-    std::lock_guard<std::mutex> lock(unsavedMutex_);
-    unsaved = unsaved_;
-  }
-  if (!unsaved || !saveBestEffort(unsaved->patch, std::nullopt, unsaved->basis)) return;
-  std::lock_guard<std::mutex> lock(unsavedMutex_);
-  unsaved_.reset();
-}
-
 }  // namespace detail
 
 // --- License -------------------------------------------------------------------
@@ -455,6 +288,11 @@ LicenseStatus License::startTrial() {
 std::optional<std::string> License::upgradeUrl(const std::string& paymentLink) {
   const std::shared_ptr<detail::Engine> engine = engine_;
   return engine->upgradeUrl(paymentLink);
+}
+
+std::optional<std::string> License::purchaseUrl(const std::string& paymentLink) {
+  const std::shared_ptr<detail::Engine> engine = engine_;
+  return engine->purchaseUrl(paymentLink);
 }
 
 }  // namespace keygrant

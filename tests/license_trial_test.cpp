@@ -1,4 +1,4 @@
-// startTrial() and a trial's status (sdk/src/license.test.ts).
+// startTrial() and a trial's status.
 #include "support.hpp"
 
 namespace kgtest {
@@ -300,8 +300,7 @@ TEST(Trial, TakesTheServersWordWhenItSaysTheTrialIsOverWhateverLeaseIsHeld) {
 }
 
 TEST(Trial, AnswersUnlicensedForATrialLeaseStoredWithoutAStartAskingNothing) {
-  // Only a stored start is a trial this device began (sdk-contract.md 5.2); no
-  // save leaves a lease or an end without one.
+  // Only a stored start is a trial this device began; no save leaves a lease or an end without one.
   Harness h;
   StoredState state;
   state.trialEndsAt = NOW + 5 * DAY;
@@ -387,13 +386,13 @@ TEST(KeptTrial, NeverMakesTheTrialLongerTheNewerAnswersEarlierEndStands) {
   EXPECT_EQ(failing->license().status(), status(LicenseState::Expired, LicenseReason::Trial));
 }
 
-TEST(KeptTrial, TakesTheNewerAnswersLaterEndTooAnOwnersExtension) {
+TEST(KeptTrial, TakesTheNewerAnswersLaterEndTooATrialTheServerExtended) {
   const auto h = keptThen(trialAnsweredLater(NOW + 20 * DAY));
   EXPECT_EQ(h->license().status().trialDaysLeft, 20);
   EXPECT_EQ(h->stored()->trialEndsAt, NOW + 20 * DAY);
 }
 
-TEST(KeptTrial, WinsOverAStoredTrialWithNoStampFromAnSdkBeforeThem) {
+TEST(KeptTrial, WinsOverAStoredTrialWithNoStamp) {
   const auto h = keptThen(trialAnsweredLater(NOW - 2 * DAY, std::nullopt));
   EXPECT_EQ(h->license().status().trialDaysLeft, 5);
   EXPECT_EQ(h->stored()->trialStart, NOW - 9 * DAY);
@@ -522,8 +521,8 @@ TEST(TrialHeal, TimesTheWaitByTheDeviceClockNotTheGuardWhenTheClockWasSetBack) {
   EXPECT_EQ(h->http->count("trial"), 1);
 }
 
-TEST(TrialHeal, HealsALeaseFromBeforeTrialLeasesRanToTheTrialsEnd) {
-  // Seven days on a fourteen-day trial, as the worker once signed them.
+TEST(TrialHeal, HealsATrialLeaseSignedShortOfTheTrialsEnd) {
+  // Seven days on a fourteen-day trial.
   Harness h;
   StoredState state;
   state.trialStart = NOW;
@@ -587,9 +586,12 @@ TEST(TrialHeal, AsksNothingOnceTheStoredEndHasPassedOrWhenTheLeaseVerifies) {
   state.trialStart = NOW - 2 * DAY;
   state.trialEndsAt = NOW + 5 * DAY;
   state.trialLease = trialLeaseTo(valid, NOW + 5 * DAY);
+  // Synced within the day, so no launch report is due either (reportLaunch).
+  state.trialAt = NOW - DAY / 2;
   state.lastSeen = NOW;
   valid.store(state);
   EXPECT_EQ(valid.license().status().state, LicenseState::Trial);
+  EXPECT_TRUE(valid.reportSettled());
   EXPECT_FALSE(h->http->called("trial"));
   EXPECT_FALSE(valid.http->called("trial"));
 }

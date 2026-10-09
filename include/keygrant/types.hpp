@@ -1,8 +1,8 @@
 // The KeyGrant licensing SDK for C++: the values a licence call answers with,
 // and the state the SDK keeps on the device.
 //
-// A port of the Electron SDK (sdk/src/types.ts), the reference: every name and
-// every stored field means what it means there.
+// A port of the Electron SDK, the reference: every name and every stored field
+// means what it means there.
 #pragma once
 
 #include <cstdint>
@@ -19,10 +19,10 @@
 
 namespace keygrant {
 
-/// A lease's `major` for a key with no upper bound (shared/src/lease.ts OPEN_MAJOR).
+/// A lease's `major` for a key with no upper bound.
 inline constexpr std::int64_t kOpenMajor = 1'000'000;
 
-/// The highest real major the server accepts in a request (shared/src/lease.ts MAX_MAJOR).
+/// The highest real major the server accepts in a request.
 inline constexpr std::int64_t kMaxMajor = 99'999;
 
 /**
@@ -51,7 +51,7 @@ enum class ActivateError {
   /// The key is for a later version than this build: update the app.
   Outdated,
   Network,
-  /// Reserved: the reference names it, and neither SDK returns it.
+  /// Named for parity with the Electron SDK; never returned.
   NotConfigured,
   /// The server returned a lease that failed offline verification (an integrity or config error).
   InvalidLease,
@@ -214,10 +214,8 @@ struct LicenseStatus {
    *
    * On a `Licensed` status, from the licence's lease; on a `Trial` status,
    * from the trial's. Empty on every other status (a stored refusal included,
-   * whatever the lease held grants), and when the lease grants none, so a
-   * lease with no entitlements leaves the status exactly as it was before
-   * entitlements were read. A member of the claim that is not a flag, a number
-   * or a text is left out (docs/specs/sdk-contract.md section 2.1), and never
+   * whatever the lease held grants), and when the lease grants none. A member
+   * of the claim that is not a flag, a number or a text is left out, and never
    * costs the licence. The status's own copy: changing it changes nothing the
    * next status says.
    */
@@ -270,8 +268,8 @@ std::ostream& operator<<(std::ostream& out, const DeactivateResult& result);
 
 /**
  * The state the SDK keeps on the device, field for field the reference's
- * (sdk/src/types.ts StoredState): times are milliseconds since the epoch, and
- * the JSON field names are the same, so the file is portable between SDKs.
+ * StoredState: times are milliseconds since the epoch, and the JSON field names
+ * are the same, so the file is portable between SDKs.
  */
 struct StoredState {
   std::optional<std::string> key;
@@ -307,6 +305,14 @@ struct StoredState {
   std::optional<std::int64_t> verdictAt;
   /// The default storage's revision of this state, one more on every save.
   std::optional<std::int64_t> rev;
+  /// The one-time purchase SECRET License::purchaseUrl keeps while no key is held; a link carries only its hash.
+  std::optional<std::string> purchaseToken;
+  /// When (guarded clock) purchaseUrl last handed out that secret's link.
+  std::optional<std::int64_t> purchaseTokenAt;
+  /// When (device clock) the key bought with it was last asked for and none came back.
+  std::optional<std::int64_t> claimAskedAt;
+  /// When (guarded clock) a running trial last reported its launch.
+  std::optional<std::int64_t> trialReportedAt;
   /**
    * What this SDK cannot read, as raw JSON text by name: fields it does not
    * know (a newer SDK's), and values of known fields it cannot read (a newer
@@ -347,7 +353,10 @@ class IoError : public std::runtime_error {
   std::string code_;
 };
 
-/** deactivate() behind a call that has not finished: nothing was released or dropped. */
+/**
+ * deactivate() behind a call that has not finished (nothing was released or
+ * dropped), or purchaseUrl() behind one with no purchase secret held.
+ */
 class StalledError : public std::runtime_error {
  public:
   StalledError();

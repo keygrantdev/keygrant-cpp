@@ -1,4 +1,4 @@
-// A call held to a time bound whatever it does: the reference's withTimeout.
+// A call held to a time bound whatever it does.
 #pragma once
 
 #include <algorithm>

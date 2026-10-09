@@ -1,5 +1,5 @@
 // Early renewal, the clock guard and its correction, answer stamps, and the
-// majors noted inside a key's upgrade window (sdk/src/license.test.ts).
+// majors noted inside a key's upgrade window.
 #include "support.hpp"
 
 namespace kgtest {

@@ -1,5 +1,4 @@
-// Who this device is: the default fingerprinter and the machine id it hashes
-// (sdk/src/adapters.ts nodeFingerprinter, sdk/src/machine-id.ts).
+// Who this device is: the default fingerprinter and the machine id it hashes.
 //
 // A machine has ONE fingerprint whichever KeyGrant SDK reads it: the same id,
 // the same host name, platform and architecture names, the same hashes.
@@ -60,8 +59,8 @@ std::optional<HostNames> hostNames();
 std::string hostNamesFingerprint(const std::optional<HostNames>& names);
 
 /**
- * The fingerprint before the machine id, and when a machine has none:
- * hashFingerprint("<hostname>|<platform>|<arch>"), or of "unknown-host".
+ * The host-name fingerprint: the fingerprint when the machine has no id to read, and an alternate
+ * beside the machine id's. hashFingerprint("<hostname>|<platform>|<arch>"), or of "unknown-host".
  */
 std::string hostnameFingerprint();
 

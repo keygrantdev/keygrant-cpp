@@ -1,5 +1,5 @@
-// status() and refresh(): offline-first, healed online, and failing in favour
-// of the customer on anything but an explicit verdict (sdk/src/license.test.ts).
+// status() and refresh(): offline-first, healed online, and failing in favour of the customer on
+// anything but an explicit verdict.
 #include "support.hpp"
 
 namespace kgtest {

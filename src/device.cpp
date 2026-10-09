@@ -53,6 +53,12 @@ Device deviceFrom(const DeviceIdentity& identity, std::optional<DeviceKind> inst
   return deviceFrom(identity, installKind, deviceHold, [](const std::string& f) { return fingerprintClaim(f); });
 }
 
+std::optional<ActivationIdentity> activationIdentity(const Device& here, std::optional<DeviceKind> install) {
+  if (here.own) return ActivationIdentity{*here.own, here.kind};
+  if (install == DeviceKind::Machine || !here.hostname) return std::nullopt;
+  return ActivationIdentity{*here.hostname, DeviceKind::Hostname};
+}
+
 DeviceIdentityReader::DeviceIdentityReader(std::shared_ptr<Fingerprinter> fingerprinter)
     : fingerprinter_(std::move(fingerprinter)) {}
 

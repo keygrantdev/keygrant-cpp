@@ -1,7 +1,7 @@
 // What the engine decides from what the device holds, without asking the
-// server (sdk/src/offline.ts): whether a lease licenses this build, what a
-// trial shows, which refusal still stands, when to ask again, and how a save
-// lands on a state another process saved meanwhile.
+// server: whether a lease licenses this build, what a trial shows, which
+// refusal still stands, when to ask again, and how a save lands on a state
+// another process saved meanwhile.
 #pragma once
 
 #include <cstdint>
@@ -22,6 +22,37 @@ inline constexpr std::int64_t kRetryUnansweredMs = 60'000;
 /// A valid lease is renewed early once less than this (or half its life) is left.
 inline constexpr std::int64_t kRenewWithinMs = 7LL * 24 * 60 * 60'000;
 inline constexpr std::int64_t kDayMs = 86'400'000;
+/**
+ * How long after a claim ask that brought no key back (`claimAskedAt`) before
+ * status() asks again on its own (claimDue): a customer back from the checkout
+ * finds the app licensed within minutes, and a device holding a purchase
+ * secret does not ask on every status(). refresh() and startTrial() ask at once.
+ */
+inline constexpr std::int64_t kClaimWaitMs = 5 * 60'000;
+/**
+ * How long after purchaseUrl last handed a link out (`purchaseTokenAt`) an
+ * unforced status() still asks the claim (claimDue): a customer who buys does
+ * so soon after opening the link. After it, only refresh() and startTrial()
+ * ask, until kPurchaseTokenMs, so an abandoned checkout does not put the
+ * network in front of every launch.
+ */
+inline constexpr std::int64_t kClaimEagerMs = kDayMs;
+/**
+ * How long a purchase secret is held after purchaseUrl last handed out its
+ * link (purchaseTokenKept, by the guarded clock): a secret past it is dropped,
+ * never sent. A drop is the device's alone: it revokes nothing on the server.
+ */
+inline constexpr std::int64_t kPurchaseTokenMs = 30 * kDayMs;
+/** How often, at most, a running trial reports its launch (trialReportDue), a trial answer counting as one. */
+inline constexpr std::int64_t kTrialReportMs = kDayMs;
+
+/**
+ * The major a build runs as: the configured one, read as the server reads a
+ * version (0.x as 1, and majors from 1 up), so a build configured as major 0 is
+ * major 1 everywhere the SDK uses the major, rather than refused offline as
+ * `outdated` by every lease. Absent is 1, and nothing is below 1.
+ */
+std::int64_t majorOf(std::optional<std::int64_t> configured);
 
 /** What a patch does to one field: nothing (not in it), clear it (undefined), or set it. */
 template <class T>
@@ -61,6 +92,10 @@ struct StatePatch {
   Change<DeviceKind> deviceKind;
   Change<std::int64_t> verdictAt;
   Change<std::int64_t> rev;
+  Change<std::string> purchaseToken;
+  Change<std::int64_t> purchaseTokenAt;
+  Change<std::int64_t> claimAskedAt;
+  Change<std::int64_t> trialReportedAt;
 
   /// `{...this, ...other}`: every field `other` names overrides.
   StatePatch& operator+=(const StatePatch& other);
@@ -201,12 +236,31 @@ struct About {
   std::optional<std::string> activationId;
 };
 
+/** A save about a purchase secret: its drop (`token` alone), or the wait after a claim ask (`token` and `at`). */
+struct AboutToken {
+  /// The secret.
+  std::string token;
+  /// For a wait: the `purchaseTokenAt` its asker read.
+  std::optional<std::int64_t> at;
+};
+
 /** What a save is based on. */
 struct Basis {
   std::optional<Asked> answer;
   std::optional<Asked> activation;
   std::optional<About> about;
   std::optional<Stamp> trial;
+  /**
+   * About a purchase secret: its purchase fields (purchaseToken,
+   * purchaseTokenAt, claimAskedAt) land only while that secret is the one
+   * stored, so one another process made meanwhile is neither dropped nor
+   * stamped by it. A wait carries the `purchaseTokenAt` its asker read (`at`),
+   * and lands only while that is stored too: a link handed out again since
+   * cleared the wait so that the next status() asks at once, and a late answer
+   * must not start it again. A drop carries none: a spent secret is dead
+   * however recently its link was handed out.
+   */
+  std::optional<AboutToken> purchase;
 };
 
 enum class OutOfDate { No, Activation, Answer };
@@ -232,6 +286,14 @@ StatePatch leasedPatch();
 /** What a deactivated device keeps of its licence: nothing but its trial evidence and clock guard. */
 StatePatch unkeyedPatch();
 
+/**
+ * What an activation (a typed key, or a bought key picked up) and a
+ * deactivation clear: the purchase secret and its stamps. A secret left on a
+ * keyed install would, after a later deactivation, activate the device on a
+ * key the customer may have meant for another machine.
+ */
+StatePatch noPurchasePatch();
+
 /** The stored refusal that still stands for a build running `major`, or none. */
 struct DeviceView {
   std::optional<std::string> ownClaim;
@@ -245,5 +307,14 @@ bool askDue(const StoredState& state, std::int64_t clockNow, bool force);
 
 /** Whether a valid lease is near enough its end to renew it early. */
 bool renewsEarly(const LeaseClaims& claims, std::int64_t now);
+
+/**
+ * Whether a running trial reports its launch at `now` (the guarded clock):
+ * neither its last trial answer (`trialAt`, a startTrial() or a heal) nor its
+ * last report (`trialReportedAt`) is within kTrialReportMs before `now`. A
+ * stamp that is absent, or at least that long before `now`, is not within it;
+ * one ahead of `now` is.
+ */
+bool trialReportDue(const StoredState& state, std::int64_t now);
 
 }  // namespace keygrant::detail

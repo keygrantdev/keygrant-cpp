@@ -1,4 +1,4 @@
-// The default fingerprinter (sdk/src/adapters.ts nodeFingerprinter, identityOf).
+// The default fingerprinter.
 #include <mutex>
 #include <stdexcept>
 

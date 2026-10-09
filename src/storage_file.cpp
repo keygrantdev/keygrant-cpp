@@ -1,5 +1,5 @@
-// FileStorage: the reference's createFileStorage (sdk/src/storage.ts) and the
-// file handling under it (sdk/src/storage-fs.ts), step for step.
+// FileStorage: the default storage and the file handling under it, reading and writing the state
+// file as the Electron SDK does.
 #include <algorithm>
 #include <array>
 #include <chrono>

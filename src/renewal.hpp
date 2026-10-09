@@ -1,7 +1,6 @@
-// The online validate (a renewal), decided without I/O (sdk/src/renewal.ts):
-// when status() asks the server while it holds a lease that licenses this
-// build (`asksOnValidLease`, license.cpp), and what an ask's answer saves and
-// says (`renewalOutcome`, engine.cpp's renew). The engine makes the request,
+// The online validate (a renewal), decided without I/O: when status() asks the server while it
+// holds a lease that licenses this build (`asksOnValidLease`, license.cpp), and what an ask's
+// answer saves and says (`renewalOutcome`, engine.cpp's renew). The engine makes the request,
 // judges the lease a 200 carried, and saves the patch as the answer to its ask.
 //
 // Licensing fails in favour of the paying customer: only an explicit verdict
@@ -55,9 +54,10 @@ struct RenewalOutcome {
 };
 
 /**
- * What a validate's answer saves and says. Every patch carries `deviceKind:
- * machine` when this run read a machine id (keyedBy): the seat is re-keyed by
- * it whatever the answer, so the install is keyed by it from now on.
+ * What a validate's answer saves and says. Every patch carries
+ * `deviceKind: machine` when this run read a machine id (keyedBy): the seat is
+ * re-keyed by it whatever the answer, so the install is keyed by it from now
+ * on.
  *
  *  - no answer at all: wait kRetryUnansweredMs, no status;
  *  - a 5xx or a 429: wait kAskAgainMs, no status;

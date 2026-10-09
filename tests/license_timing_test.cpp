@@ -1,6 +1,5 @@
-// Every call bounded, one at a time, and read-only behind one that is stuck
-// (sdk/src/license.test.ts "the waits, early renewal, bounded calls..."), in
-// real time with the SDK's timings shortened.
+// Every call bounded, one at a time, and read-only behind one that is stuck, in real time with the
+// SDK's timings shortened.
 #include <future>
 #include <thread>
 

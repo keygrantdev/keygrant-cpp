@@ -1,5 +1,5 @@
-// A lease held to its key, its activation and its device, and who the device
-// is when it cannot be told (sdk/src/license.test.ts).
+// A lease held to its key, its activation and its device, and who the device is when it cannot be
+// told.
 #include <thread>
 
 #include "machine_id.hpp"
@@ -101,7 +101,7 @@ TEST_F(Device, LicensesThisDeviceOnItsOwnLeaseOffline) {
   EXPECT_EQ(h.http->count("validate"), 0);
 }
 
-TEST_F(Device, TakesALeaseSignedBeforeTheDeviceClaimAndMatchesTheKeyWithoutRegardToCase) {
+TEST_F(Device, TakesALeaseWithNoDeviceClaimAndMatchesTheKeyWithoutRegardToCase) {
   Harness before;
   before.store(held(leaseFor(before, std::nullopt)));
   before.http->fail = true;
@@ -147,7 +147,7 @@ TEST_F(Device, StaysRefusedForAnotherDeviceEvenOnlineTheServerRenewsTheOtherDevi
   EXPECT_EQ(h.license().refresh(), device);
 }
 
-TEST_F(Device, SaysDeviceOfflineTooOnceALeaseFromBeforeTheClaimIsRenewedWithAnotherDevices) {
+TEST_F(Device, SaysDeviceOfflineTooOnceALeaseWithNoDeviceClaimIsRenewedWithAnotherDevices) {
   Harness h;
   h.store(held(leaseFor(h, std::nullopt)));
   h.http->reply("validate", 200, leaseAnswer(leaseFor(h, std::string("fp-another-machine"))));
@@ -219,7 +219,7 @@ TEST_F(Device, NeverReactivatesUnderTheHostNameTheSeatAMachineIdKeyed) {
   }
 }
 
-TEST_F(Device, TakesALeaseFromAnActivationUnderTheHostNameBeforeTheMachineIdAndRenewsIt) {
+TEST_F(Device, TakesALeaseFromAnActivationUnderTheHostNameAndRenewsIt) {
   Harness h(std::nullopt, with(registry(0)));
   const std::string legacy = leaseFor(h, hostnameFingerprint(), "hostname");
   h.store(held(legacy));

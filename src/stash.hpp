@@ -1,7 +1,7 @@
-// The default Windows trial stash's one format, shared by every KeyGrant SDK
-// (docs/specs/sdk-contract.md 5.4): HKCU\Software\KeyGrant\<product>, value
-// TrialStart, the start in ms since the epoch as a REG_QWORD. What a reader
-// takes of it is decided here, without the registry, so every platform tests it.
+// The default Windows trial stash's one format, shared by every KeyGrant SDK:
+// HKCU\Software\KeyGrant\<product>, value TrialStart, the start in ms since
+// the epoch as a REG_QWORD. What a reader takes of it is decided here, without
+// the registry, so every platform tests it.
 #pragma once
 
 #include <cstdint>

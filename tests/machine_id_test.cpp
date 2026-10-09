@@ -1,6 +1,6 @@
-// The machine id and the default fingerprinter (sdk/src/adapters.test.ts):
-// the parsing and decisions are portable and tested here on every platform;
-// the reads behind them are the registry API on Windows and IOKit on macOS.
+// The machine id and the default fingerprinter: the parsing and decisions are
+// portable and tested here on every platform; the reads behind them are the
+// registry API on Windows and IOKit on macOS.
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>

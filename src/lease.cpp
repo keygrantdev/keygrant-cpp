@@ -12,7 +12,7 @@ const json* field(const json& object, const char* name) {
   return it == object.end() ? nullptr : &*it;
 }
 
-/** z.string().min(min).max(max), lengths in UTF-16 units. */
+/** A string of `min` to `max` UTF-16 units. */
 bool string(const json* value, std::size_t min, std::size_t max, std::string& out) {
   if (value == nullptr || !value->is_string()) return false;
   out = sanitizeUtf8(value->get_ref<const std::string&>());
@@ -20,7 +20,7 @@ bool string(const json* value, std::size_t min, std::size_t max, std::string& ou
   return length >= min && length <= max;
 }
 
-/** z.number().int() with a lower bound: `> 0` when `positive`, else `>= 0`. */
+/** A whole number with a lower bound: `> 0` when `positive`, else `>= 0`. */
 bool integer(const json* value, bool positive, std::int64_t& out) {
   if (value == nullptr) return false;
   const std::optional<std::int64_t> n = wholeNumber(*value);

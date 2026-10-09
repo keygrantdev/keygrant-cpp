@@ -1,6 +1,5 @@
-// The libcurl adapter against servers on this machine, plain and TLS, on every
-// platform (sdk/src/adapters.test.ts fetchHttp): the status and body whatever
-// the status, TLS verified, redirects as fetch follows them, every call bounded.
+// The libcurl adapter against servers on this machine, plain and TLS, on every platform: the status
+// and body whatever the status, TLS verified, redirects as fetch follows them, every call bounded.
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN

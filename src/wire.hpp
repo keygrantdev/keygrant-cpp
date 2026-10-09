@@ -1,5 +1,4 @@
-// What the SDK sends and reads on the wire, and the small pieces of it that
-// need no engine state (sdk/src/wire.ts).
+// What the SDK sends and reads on the wire, and the small pieces of it that need no engine state.
 #pragma once
 
 #include <chrono>
@@ -64,11 +63,10 @@ std::optional<std::string> enteredKey(const std::string& key);
 std::optional<std::string> trimToLength(const std::optional<std::string>& value, std::size_t max);
 
 /**
- * A licensed status from the lease that licenses it: `test` when the lease
- * says so, and the entitlements it grants (none leaves the status as it was
- * before entitlements were read). Test licences verify like any other (they
- * are signed with the product's real key); the flag is how an app tells them
- * apart, e.g. to refuse them in a release build.
+ * A licensed status from the lease that licenses it: `test` when the lease says so, and the
+ * entitlements it grants, if any. Test licences verify like any other (they are signed with the
+ * product's real key); the flag is how an app tells them apart, e.g. to refuse them in a release
+ * build.
  */
 LicenseStatus licensedStatus(const std::optional<std::string>& key, bool test,
                              std::map<std::string, Entitlement> entitlements = {});
@@ -93,6 +91,25 @@ struct TrialBody {
   std::optional<std::string> lease;
 };
 std::optional<TrialBody> parseTrialBody(const json& body);
+
+/** A claim's answer (parseClaimBody): what of each member it can use. */
+struct ClaimBody {
+  std::optional<std::string> key;
+  std::optional<std::string> activationId;
+  std::optional<std::string> lease;
+  /// "Not bought yet": only a `pending` that is `true`.
+  bool pending = false;
+  /// The answer's error word: only a string of at least one character.
+  std::optional<std::string> error;
+};
+
+/**
+ * A claim's answer, keeping each member only when it is what it should be:
+ * the key, the activation id and the lease when they are strings, `pending`
+ * when it is `true`, the error when it is a word. Members it does not know are
+ * ignored, and a body that is not an object is nothing.
+ */
+ClaimBody parseClaimBody(const json& body);
 
 /** The smallest of the times given, or none. */
 std::optional<std::int64_t> earliest(std::initializer_list<std::optional<std::int64_t>> values);

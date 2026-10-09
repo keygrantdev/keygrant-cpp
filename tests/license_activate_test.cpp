@@ -1,4 +1,4 @@
-// activate(), deactivate(), upgradeUrl() and test licences (sdk/src/license.test.ts).
+// activate(), deactivate(), upgradeUrl() and test licences.
 #include "support.hpp"
 
 namespace kgtest {
@@ -414,7 +414,6 @@ TEST(Config, RefusesABadConfigAtConstruction) {
   refused([](auto& c) { c.apiBaseUrl = "api.keygrant.dev"; });
   refused([](auto& c) { c.apiBaseUrl = "ftp://api.keygrant.dev"; });
   refused([](auto& c) { c.apiBaseUrl = "https://"; });
-  refused([](auto& c) { c.major = 0; });
   refused([](auto& c) { c.major = keygrant::kMaxMajor + 1; });
   refused([](auto& c) { c.httpTimeout = Millis{0}; });
   // And takes a good one, the bare `x` included.
@@ -423,6 +422,44 @@ TEST(Config, RefusesABadConfigAtConstruction) {
   bare.apiBaseUrl = "HTTPS://api.keygrant.dev";
   bare.major = keygrant::kMaxMajor;
   EXPECT_NO_THROW(keygrant::License{bare});
+  // A 0.x build (major 0), and anything below it, runs as major 1 (majorOf): no bad config.
+  for (const std::int64_t major : {std::int64_t{0}, std::int64_t{-3}}) {
+    bare.major = major;
+    EXPECT_NO_THROW(keygrant::License{bare}) << major;
+  }
+}
+
+/** A perpetual lease for KEY on act_1, covering majors 1 (no lowest named) to `major`. */
+std::string leaseUpTo(const Harness& h, std::int64_t major) {
+  LeaseSpec spec;
+  spec.major = major;
+  return h.sign(spec);
+}
+
+TEST(ZeroMajor, IsLicensedOfflineByALeaseForMajorOneNotRefusedAsOutdated) {
+  HarnessOptions options;
+  options.major = 0;
+  Harness h(std::nullopt, options);
+  h.store(held(leaseUpTo(h, 1)));
+  h.http->fail = true;
+  EXPECT_EQ(h.license().status(), licensed(KEY));
+}
+
+TEST(ZeroMajor, SendsMajorOneWithItsActivationAndItsValidateAsTheServerReadsIt) {
+  for (const std::int64_t configured : {std::int64_t{0}, std::int64_t{-3}}) {
+    SCOPED_TRACE(configured);
+    HarnessOptions options;
+    options.major = configured;
+    Harness h(std::nullopt, options);
+    const std::string lease = leaseUpTo(h, 1);
+    h.http->reply("activate", 200, leaseAnswer(lease));
+    h.http->reply("validate", 200, json{{"lease", lease}});
+    EXPECT_EQ(h.license().activate(KEY), ok());
+    EXPECT_EQ(h.license().refresh(), licensed(KEY));
+    EXPECT_EQ(h.http->bodyOf("activate")["major"], 1);
+    EXPECT_EQ(h.http->bodyOf("validate")["major"], 1);
+    EXPECT_EQ(h.stored()->checkedMajor, 1);
+  }
 }
 
 TEST(Config, SendsToTheApiBaseWithoutItsTrailingSlash) {

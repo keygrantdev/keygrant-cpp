@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(keygrant
-  VERSION 0.1.0
+  VERSION 0.2.0
   DESCRIPTION "KeyGrant licensing SDK for native desktop apps"
   LANGUAGES CXX)
 
@@ -46,12 +46,15 @@ add_library(keygrant
   src/machine_id.cpp
   src/machine_id_system.cpp
   src/offline.cpp
+  src/pickup.cpp
+  src/purchases.cpp
   src/renewal.cpp
   src/state_json.cpp
   src/storage_file.cpp
   src/storage_fs.cpp
   src/storage_paths.cpp
   src/sys.cpp
+  src/trials.cpp
   src/types.cpp
   src/url.cpp
   src/utf.cpp
@@ -111,12 +114,17 @@ if(KEYGRANT_BUILD_TESTS)
   # The tests' own TLS server (the libcurl adapter's TLS and redirects).
   find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto SSL)
   add_executable(keygrant_tests
+    tests/conformance_purchase_test.cpp
+    tests/conformance_support.cpp
     tests/conformance_test.cpp
     tests/crypto_test.cpp
     tests/http_test.cpp
+    tests/launch_report_test.cpp
     tests/license_activate_test.cpp
     tests/license_device_test.cpp
     tests/license_entitlements_test.cpp
+    tests/license_pickup_test.cpp
+    tests/license_purchase_test.cpp
     tests/license_renewal_test.cpp
     tests/license_status_test.cpp
     tests/license_timing_test.cpp
@@ -139,9 +147,9 @@ if(KEYGRANT_BUILD_TESTS)
     nlohmann_json::nlohmann_json
     Threads::Threads)
   set_target_properties(keygrant_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
-  # The conformance vectors every KeyGrant SDK answers: beside this file in the public
-  # keygrant-cpp repository (scripts/export-sdk.mjs copies them there), else at the root
-  # of the KeyGrant repository around it.
+  # The conformance vectors every KeyGrant SDK answers: conformance/vectors.json
+  # beside this file, else in the folder above it (a checkout that keeps the SDK
+  # in a subfolder).
   set(KEYGRANT_VECTORS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/conformance/vectors.json")
   if(NOT EXISTS "${KEYGRANT_VECTORS_FILE}")
     set(KEYGRANT_VECTORS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../conformance/vectors.json")

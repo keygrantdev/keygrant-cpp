@@ -9,7 +9,7 @@
 #define KEYGRANT_STATE_FIELDS(X)                                                                          \
   X(key) X(activationId) X(lease) X(trialStart) X(trialEndsAt) X(trialLease) X(trialAt) X(lastSeen)     \
   X(checkedMajor) X(keptMajor) X(backoffSince) X(backoffMs) X(refused) X(refusedMajor) X(refusedFor) \
-  X(deviceKind) X(verdictAt) X(rev)
+  X(deviceKind) X(verdictAt) X(rev) X(purchaseToken) X(purchaseTokenAt) X(claimAskedAt) X(trialReportedAt)
 
 namespace keygrant::detail {
 
@@ -54,6 +54,10 @@ OutOfDate outOfDate(const StoredState& latest, const Basis& basis) {
 }
 
 }  // namespace
+
+std::int64_t majorOf(std::optional<std::int64_t> configured) {
+  return std::max<std::int64_t>(1, configured.value_or(1));
+}
 
 StatePatch& StatePatch::operator+=(const StatePatch& other) {
 #define KEYGRANT_OVERLAY(f) \
@@ -286,6 +290,15 @@ StoredState merged(const StoredState& latest, const StatePatch& patch, const Bas
     keepOut(applied.trialLease);
     keepOut(applied.trialAt);
   }
+  const bool aboutStored = basis.purchase && latest.purchaseToken == basis.purchase->token &&
+                           (!basis.purchase->at || latest.purchaseTokenAt == basis.purchase->at);
+  if (basis.purchase && !aboutStored) {
+    // About a secret no longer stored (or, for a wait, one whose link was handed
+    // out again since): another process's new one, or its cleared wait, stays.
+    keepOut(applied.purchaseToken);
+    keepOut(applied.purchaseTokenAt);
+    keepOut(applied.claimAskedAt);
+  }
   const std::optional<std::int64_t> trialStart = earliest({latest.trialStart, applied.trialStart.get()});
   StoredState result = latest;
   apply(result, applied);
@@ -329,6 +342,14 @@ StatePatch unkeyedPatch() {
   return patch + leasedPatch();
 }
 
+StatePatch noPurchasePatch() {
+  StatePatch patch;
+  patch.purchaseToken = Change<std::string>::clear();
+  patch.purchaseTokenAt = Change<std::int64_t>::clear();
+  patch.claimAskedAt = Change<std::int64_t>::clear();
+  return patch;
+}
+
 std::optional<Refusal> standingRefusal(const StoredState& state, std::int64_t major,
                                        const std::optional<DeviceView>& device) {
   if (!state.refused) return std::nullopt;
@@ -354,6 +375,11 @@ bool renewsEarly(const LeaseClaims& claims, std::int64_t now) {
   const double left = static_cast<double>(claims.exp) * 1000.0 - static_cast<double>(now);
   const double life = (static_cast<double>(claims.exp) - static_cast<double>(claims.iat)) * 1000.0;
   return left < std::min(static_cast<double>(kRenewWithinMs), life / 2.0);
+}
+
+bool trialReportDue(const StoredState& state, std::int64_t now) {
+  const auto recent = [now](const std::optional<std::int64_t>& at) { return at && now - *at < kTrialReportMs; };
+  return !recent(state.trialAt) && !recent(state.trialReportedAt);
 }
 
 }  // namespace keygrant::detail

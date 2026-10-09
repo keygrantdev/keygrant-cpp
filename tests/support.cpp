@@ -10,6 +10,7 @@
 #include <thread>
 
 #include "crypto.hpp"
+#include "engine.hpp"
 #include "state_json.hpp"
 
 namespace kgtest {
@@ -167,7 +168,14 @@ std::optional<StoredState> MemoryStorage::read(bool) {
   if (hangRead_.exchange(false)) readGate_.wait();
   if (failReads || failNextRead.exchange(false)) throw keygrant::IoError("EBUSY", "the disk said no");
   std::lock_guard<std::mutex> lock(mutex_);
+  if (storeAt_ > 0 && --storeAt_ == 0) stored_ = std::move(storeBefore_);
   return stored_;
+}
+
+void MemoryStorage::storeBeforeRead(int nth, std::optional<StoredState> state) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  storeAt_ = nth;
+  storeBefore_ = std::move(state);
 }
 
 void MemoryStorage::write(const StoredState& state) {
@@ -197,6 +205,7 @@ void MemoryStorage::releaseAll() {
 }
 
 std::optional<std::int64_t> MemoryRegistry::readTrialStart() {
+  ++reads;
   if (failReads) throw std::runtime_error("the registry said no");
   std::lock_guard<std::mutex> lock(mutex_);
   return value_;
@@ -249,6 +258,21 @@ void FakeFingerprinter::identifyAs(DeviceKind kind, std::vector<std::string> alt
   alternates_ = std::move(alternates);
 }
 
+std::optional<keygrant::DeviceIdentity> TimedId::identify(Millis timeout) {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    timeouts_.push_back(timeout);
+  }
+  keygrant::DeviceIdentity identity;
+  identity.alternates = {"fp-host"};
+  return identity;
+}
+
+std::vector<Millis> TimedId::timeouts() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return timeouts_;
+}
+
 keygrant::HttpResponse FakeHttp::post(const std::string& url, const std::string& body, Millis timeout) {
   const std::string action = url.substr(url.rfind('/') + 1);
   Handler handler;
@@ -293,6 +317,15 @@ json FakeHttp::bodyOf(const std::string& action) {
   }
   ADD_FAILURE() << "expected a " << action << " call";
   return json();
+}
+
+std::vector<json> FakeHttp::bodiesOf(const std::string& action) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  std::vector<json> out;
+  for (const Call& call : calls_) {
+    if (call.action == action) out.push_back(call.body);
+  }
+  return out;
 }
 
 std::vector<std::string> FakeHttp::actions() {
@@ -352,6 +385,10 @@ Harness::~Harness() {
   storage->releaseAll();
   http->hangGate().open();
   if (auto* fake = dynamic_cast<FakeFingerprinter*>(fingerprint.get())) fake->gate().open();
+}
+
+bool Harness::reportSettled(Millis timeout) {
+  return keygrant::detail::LicenseAccess::launchReportSettled(*license_, timeout);
 }
 
 std::unique_ptr<keygrant::License> Harness::licenseFor(std::int64_t major) {

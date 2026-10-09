@@ -1,5 +1,4 @@
-// The lease's entitlements in every status, and the value type that holds one
-// (sdk/src/license.test.ts "entitlements").
+// The lease's entitlements in every status, and the value type that holds one.
 #include <cstddef>
 #include <future>
 #include <optional>

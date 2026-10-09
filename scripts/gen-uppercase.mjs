@@ -2,7 +2,7 @@
 // toUpperCase changes, and what it becomes (locale-independent full case
 // mapping, as the reference SDK upper-cases an entered licence key).
 //
-//   node sdk-cpp/scripts/gen-uppercase.mjs
+//   node scripts/gen-uppercase.mjs
 //
 // The table is what the Node running this answers (its ICU's Unicode version).
 import { writeFileSync } from 'node:fs'

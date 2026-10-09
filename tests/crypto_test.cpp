@@ -1,6 +1,5 @@
-// The lease's cryptography and claims (shared/src/crypto.test.ts, and the
-// schema's edges): canonical base64url, the public key, verification, and the
-// entitlements claim read leniently.
+// The lease's cryptography and claims, and the schema's edges: canonical base64url, the public key,
+// verification, and the entitlements claim read leniently.
 #include "crypto.hpp"
 #include "lease.hpp"
 #include "support.hpp"
@@ -181,8 +180,8 @@ TEST_F(Verify, ExpiresOnlyAfterItsLastMillisecond) {
 
 TEST_F(Verify, ReadsTheSchemasEdgesAsTheReferenceDoes) {
   const ordered_json base = claimsOf(LeaseSpec{});
-  // An optional claim that is present but null is not absent: zod refuses it
-  // (`ent` aside, which is read leniently: below).
+  // An optional claim that is present but null is not absent: the schema refuses it (`ent` aside,
+  // which is read leniently: below).
   for (const char* name : {"fp", "fpk", "minMajor", "upgradeUntil", "grace", "test", "major"}) {
     EXPECT_EQ(verifyWith(name, nullptr).reason, VerifyFailure::BadClaims) << name;
   }
@@ -262,11 +261,10 @@ TEST_F(Verify, ReadsEntitlementNumbersAsTheNearestDoubleAsJavaScriptDoes) {
 }
 
 TEST_F(Verify, RefusesWholeAPayloadItsJsonReaderCannotReadALoneSurrogateOrANumberPastADouble) {
-  // As the README's parity list says: nlohmann/json refuses an escaped lone
-  // surrogate and a number past a double's range, so the lease is bad-claims
-  // here, where the reference keeps the entitlement. The signer writes
-  // neither (contract 2.1).
-  // \x5c is a backslash: a JSON escape in the payload, never a C++ one.
+  // As the README's parity list says: nlohmann/json refuses an escaped lone surrogate and a number
+  // past a double's range, so the lease is bad-claims here, where the reference keeps the
+  // entitlement. The signer writes neither. \x5c is a backslash: a JSON escape in the payload,
+  // never a C++ one.
   EXPECT_EQ(verifyEntText("{\"edition\":\"\x5cud800\"}").reason, VerifyFailure::BadClaims);
   EXPECT_EQ(verifyEntText("{\"\x5cudc00edition\":\"pro\"}").reason, VerifyFailure::BadClaims);
   EXPECT_EQ(verifyEntText(R"({"seats":1e400})").reason, VerifyFailure::BadClaims);

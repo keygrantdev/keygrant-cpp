@@ -26,9 +26,12 @@ std::string checkedBase(const std::string& apiBaseUrl) {
   return base;
 }
 
-std::int64_t checkedMajor(std::int64_t major) {
-  // The server refuses any other major in every body, so every call would fail.
-  if (major < 1 || major > kMaxMajor) throw std::invalid_argument("major: 1 to 99999");
+std::int64_t checkedMajor(std::int64_t configured) {
+  // As the server reads a version (majorOf): a 0.x build runs as major 1, one
+  // reading used wherever the major is.
+  const std::int64_t major = majorOf(configured);
+  // The server refuses a larger one in every body, so every call would fail.
+  if (major > kMaxMajor) throw std::invalid_argument("major: at most 99999");
   return major;
 }
 
@@ -60,21 +63,24 @@ Engine::Engine(LicenseConfig config, const Timings& timings)
       timings_(timings),
       key_(VerifyingKey::fromJwk(config.publicJwk)),
       a_(withDefaults(std::move(config.adapters), product_)),
-      reader_(a_.fingerprint) {}
+      reader_(std::make_shared<DeviceIdentityReader>(a_.fingerprint)) {}
 
 /**
  * Run `work` once every call before it on this instance has finished: each
  * starts from what the last one left, and the second of two overlapping checks
  * finds it already answered. A call waits for the one before it to settle, but
  * not past the HTTP bound plus the lock grace from when that one STARTED
- * running. The storage, fingerprint and registry adapters are not bounded
- * (cutting a storage write short could leave it half-written), so a call stuck
+ * running, `extra` more for a call that may make a second, shorter request
+ * (startTrial(): a claim bounded as a status check is, then its trial ask, so
+ * its longest legitimate run fits). The storage, fingerprint and registry
+ * adapters are not bounded (cutting a storage write short could leave it
+ * half-written), so a call stuck
  * on one is left to finish, and the calls behind it go ahead READ-ONLY for as
  * long as any call before them is unsettled: answering from what is stored,
  * with no ask and no write, since a write of theirs could be reverted by the
  * stuck call's late one.
  */
-void Engine::serial(const std::function<void(bool readOnly)>& work) {
+void Engine::serial(const std::function<void(bool readOnly)>& work, Milliseconds extra) {
   auto own = std::make_shared<Slot>();
   bool readOnly = false;
   {
@@ -88,7 +94,8 @@ void Engine::serial(const std::function<void(bool readOnly)>& work) {
     readOnly = writing_ > 0;
     if (!readOnly) ++writing_;
     own->started = true;
-    own->graceOver = std::chrono::steady_clock::now() + httpTimeout_ + std::min(timings_.lockGrace, kLongestBound);
+    own->graceOver = std::chrono::steady_clock::now() + httpTimeout_ + std::min(timings_.lockGrace, kLongestBound) +
+                     std::clamp(extra, Milliseconds{0}, kLongestBound);
   }
   serialChanged_.notify_all();
   struct Settle {
@@ -114,12 +121,21 @@ void Engine::serial(const std::function<void(bool readOnly)>& work) {
  */
 std::optional<Reply> Engine::post(const std::string& action, const ordered_json& body,
                                   std::optional<Milliseconds> timeout) {
-  const std::string url = base_ + "/v1/products/" + product_ + "/" + action;
-  const Milliseconds bound = std::clamp(timeout.value_or(httpTimeout_), Milliseconds{1}, kLongestBound);
+  return postTo(a_.http, endpoint(action), body, timeout.value_or(httpTimeout_));
+}
+
+/** The product's endpoint for `action`. */
+std::string Engine::endpoint(const std::string& action) const {
+  return base_ + "/v1/products/" + product_ + "/" + action;
+}
+
+/** POST `body` to `url` through `http`, held to `bound` whatever the adapter does; none when there was no answer. */
+std::optional<Reply> Engine::postTo(const std::shared_ptr<HttpAdapter>& http, const std::string& url,
+                                    const ordered_json& body, Milliseconds bound) {
+  const Milliseconds held = std::clamp(bound, Milliseconds{1}, kLongestBound);
   const std::string text = dumpJson(body);
-  const std::shared_ptr<HttpAdapter> http = a_.http;
   const auto response =
-      runBounded<HttpResponse>([http, url, text, bound] { return http->post(url, text, bound); }, bound);
+      runBounded<HttpResponse>([http, url, text, held] { return http->post(url, text, held); }, held);
   if (!response) return std::nullopt;
   return Reply{response->status, parseJsonText(response->body)};
 }
@@ -149,7 +165,7 @@ TrialLease Engine::trialLease(const std::string& lease, std::int64_t now, std::o
  * `install`, held to its device as configured (deviceHold): deviceFrom.
  */
 Device Engine::device(Milliseconds timeout, std::optional<DeviceKind> install) {
-  return reader_.read(DeviceBounds{timeout, timings_.identifyExtra}, install, deviceHold_);
+  return reader_->read(DeviceBounds{timeout, timings_.identifyExtra}, install, deviceHold_);
 }
 
 std::optional<DeviceKind> Engine::installKind(std::optional<DeviceKind> stored) const {
@@ -266,14 +282,26 @@ Engine::Judged Engine::judgeFresh(const StoredState& state, const std::optional<
   const std::optional<std::string> lease =
       response && response->status == 200 ? parseLeaseBody(response->body).lease : std::nullopt;
   if (!truthy(lease)) return Judged{std::nullopt, effectiveNow(state)};
+  return judged(*lease, state.key.value_or(""), state.activationId.value_or(""), state.deviceKind,
+                [this, &state] { return effectiveNow(state); });
+}
+
+/**
+ * A lease the server just answered, checked for `key` and `activationId` on
+ * this device, keyed as `kind` (evaluate), as of the server's time (serverNow,
+ * the clock guard brought back best-effort; `fallbackNow` when the state
+ * cannot be read or saved just now). With the time it was judged at.
+ */
+Engine::Judged Engine::judged(const std::string& lease, const std::string& key, const std::string& activationId,
+                              std::optional<DeviceKind> kind, const std::function<std::int64_t()>& fallbackNow) {
   std::int64_t now = 0;
   try {
-    now = serverNow(*lease, state.key.value_or(""), state.activationId.value_or(""),
+    now = serverNow(lease, key, activationId,
                     [this](const StatePatch& patch, std::int64_t guard) { saveBestEffort(patch, guard); });
   } catch (...) {
-    now = effectiveNow(state);
+    now = fallbackNow();
   }
-  return Judged{evaluate(*lease, now, state.key, state.activationId, state.deviceKind), now};
+  return Judged{evaluate(lease, now, key, activationId, kind), now};
 }
 
 /**
