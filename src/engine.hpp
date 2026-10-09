@@ -38,6 +38,8 @@ class Engine {
 
   ActivateResult activate(const std::string& key);
   LicenseStatus status(bool forceOnline);
+  /// Whether the stored licence grants `code`, offline (License::has).
+  bool has(const std::string& code);
   DeactivateResult deactivate();
   LicenseStatus startTrial();
   std::optional<std::string> upgradeUrl(const std::string& paymentLink);
@@ -155,6 +157,8 @@ class Engine {
   Judged judged(const std::string& lease, const std::string& key, const std::string& activationId,
                 std::optional<DeviceKind> kind, const std::function<std::int64_t()>& fallbackNow);
   ordered_json validateBody(const StoredState& state, const Device& device) const;
+  /// The ids of the keys this build carries, as a check-in reports them (`kids`).
+  ordered_json kidsJson() const;
 
   // --- decisions (license.cpp) ---------------------------------------------
   ActivateResult activateNow(const std::string& key);
@@ -194,7 +198,7 @@ class Engine {
   bool deviceHold_ = true;
   Milliseconds httpTimeout_;
   Timings timings_;
-  VerifyingKey key_;
+  KeySet keys_;
   Adapters a_;
   /// Shared with a launch report's thread, which may outlive the engine.
   std::shared_ptr<DeviceIdentityReader> reader_;

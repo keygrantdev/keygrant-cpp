@@ -38,7 +38,9 @@ TEST(Conformance, EveryGroupInTheFileIsReplayedHere) {
       "savedLastSeen", "leaseStatuses",  "trialLeaseStatuses", "entitlementNumbers",
       // Added with the purchase from the trial: conformance_purchase_test.cpp.
       "majors",       "purchaseUrls",    "purchaseTokenKept", "claimDue",       "parseClaimBody",
-      "claimOutcomes", "trialReportDue",  "purchaseReferences", "claimBodies"};
+      "claimOutcomes", "trialReportDue",  "purchaseReferences", "claimBodies",
+      // Added with key sets and the entitlement helpers: conformance_keys_test.cpp.
+      "keyIds",       "keySets",         "grants"};
   std::set<std::string> inFile;
   for (const auto& [name, value] : vectors().items()) {
     if (value.is_array() && !value.empty() && value.front().is_object()) inFile.insert(name);
@@ -110,7 +112,7 @@ TEST(Conformance, Leases) {
     verdicts.insert(check.ok ? "ok" : to_string(check.reason));
   }
   // Every kind of verdict the offline check can give is covered.
-  EXPECT_EQ(verdicts, (std::set<std::string>{"device", "expired", "ok", "outdated", "tampered", "upgrade"}));
+  EXPECT_EQ(verdicts, (std::set<std::string>{"device", "expired", "ok", "outdated", "tampered", "unknown-key", "upgrade"}));
 }
 
 TEST(Conformance, TrialLeases) {

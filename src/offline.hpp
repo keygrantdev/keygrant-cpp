@@ -112,7 +112,7 @@ std::vector<std::string> setFields(const StatePatch& patch);
 std::vector<std::string> clearedFields(const StatePatch& patch);
 
 /** What a lease says about this build, offline. */
-enum class LeaseVerdict { Expired, Upgrade, Outdated, Tampered, Device };
+enum class LeaseVerdict { Expired, Upgrade, Outdated, Tampered, UnknownKey, Device };
 
 const char* to_string(LeaseVerdict verdict) noexcept;
 

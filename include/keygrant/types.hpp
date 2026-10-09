@@ -40,7 +40,19 @@ enum class LicenseState { Licensed, Trial, Expired, Invalid, Unlicensed, Unknown
  * another one); activate again on this one. `Tampered`: the lease is not for
  * this licence at all. `Storage`: the licence file could not be read just now.
  */
-enum class LicenseReason { Revoked, Upgrade, Outdated, Offline, Tampered, Device, Trial, Storage };
+enum class LicenseReason {
+  Revoked,
+  Upgrade,
+  Outdated,
+  Offline,
+  Tampered,
+  Device,
+  Trial,
+  Storage,
+  /// The lease is signed by a key this build does not carry (LicenseConfig::publicJwk). Asked
+  /// online, the server signs one with the key it uses now, which a build carrying that key verifies.
+  UnknownKey,
+};
 
 /** Why activate() did not activate. */
 enum class ActivateError {
@@ -361,5 +373,23 @@ class StalledError : public std::runtime_error {
  public:
   StalledError();
 };
+
+/** What License::require() throws when the licence does not grant an entitlement: names it. */
+class MissingEntitlement : public std::runtime_error {
+ public:
+  explicit MissingEntitlement(std::string entitlement);
+  /// The entitlement's code, as the app asked for it.
+  const std::string& entitlement() const noexcept { return entitlement_; }
+
+ private:
+  std::string entitlement_;
+};
+
+/**
+ * Whether entitlements grant `code`: a flag that is on, a number that is not
+ * zero, or a text that is not empty. Absent, off, zero or empty is not
+ * granted. The code is matched exactly, byte for byte.
+ */
+bool grants(const std::map<std::string, Entitlement>& entitlements, const std::string& code);
 
 }  // namespace keygrant

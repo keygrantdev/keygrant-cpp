@@ -118,7 +118,9 @@ Engine::Pickup Engine::claim(const StoredState& state, const std::string& secret
 
 /** POST `claim` with its body (claimRequest); none when it threw or timed out. */
 std::optional<Reply> Engine::postClaim(const ClaimRequest& body, std::optional<Milliseconds> timeout) {
-  return post("claim", claimJson(body), timeout);
+  ordered_json sent = claimJson(body);
+  sent["kids"] = kidsJson();
+  return post("claim", sent, timeout);
 }
 
 /**

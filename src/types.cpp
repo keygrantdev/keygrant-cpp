@@ -26,6 +26,7 @@ const char* to_string(LicenseReason value) noexcept {
     case LicenseReason::Device: return "device";
     case LicenseReason::Trial: return "trial";
     case LicenseReason::Storage: return "storage";
+    case LicenseReason::UnknownKey: return "unknown-key";
   }
   return "storage";
 }
@@ -161,5 +162,18 @@ IoError::IoError(std::string code, const std::string& message)
     : std::runtime_error(code + ": " + message), code_(std::move(code)) {}
 
 StalledError::StalledError() : std::runtime_error("a previous licence call has not finished; try again") {}
+
+MissingEntitlement::MissingEntitlement(std::string entitlement)
+    : std::runtime_error("the licence does not grant \"" + entitlement + "\""), entitlement_(std::move(entitlement)) {}
+
+bool grants(const std::map<std::string, Entitlement>& entitlements, const std::string& code) {
+  const auto found = entitlements.find(code);
+  if (found == entitlements.end()) return false;
+  const Entitlement& value = found->second;
+  if (const std::optional<bool> flag = value.flag()) return *flag;
+  if (const std::optional<double> number = value.number()) return *number != 0;
+  const std::optional<std::string> text = value.text();
+  return text.has_value() && !text->empty();
+}
 
 }  // namespace keygrant

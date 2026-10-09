@@ -22,8 +22,14 @@ struct LicenseConfig {
   /// KeyGrant API base, e.g. "https://api.keygrant.dev".
   std::string apiBaseUrl;
   /**
-   * The product's public key, embedded at build time for offline verification:
-   * the JWK as JSON ({"kty":"OKP","crv":"Ed25519","x":"..."}), or its bare `x`.
+   * The product's public keys, embedded at build time for offline
+   * verification: its key set, the `keys` of
+   * GET https://api.keygrant.dev/v1/products/<product>/pubkey as
+   * {"keys":[...]} (or that whole answer, or a JSON list of JWKs): the key
+   * that signs its leases, and the next one once the product has one staged.
+   * One key is a set of one: its JWK ({"kty":"OKP","crv":"Ed25519","x":"..."})
+   * or its bare `x`. A lease naming its key (`kid`) is verified by that key;
+   * one naming none by each in turn.
    */
   std::string publicJwk;
   /**
@@ -123,6 +129,24 @@ class License {
 
   /// status() asked online at once, whatever the waits say.
   LicenseStatus refresh();
+
+  /**
+   * Whether the licence this device holds grants the entitlement `code`: a
+   * flag that is on, a number that is not zero, or a text that is not empty
+   * (grants()). Offline, from the stored lease only: the entitlements of the
+   * status status() gives from what is stored, with no ask and no write, so a
+   * licence that does not license this build, and none at all, grant nothing.
+   * A running trial grants what its trial lease does. Never throws: a state
+   * that cannot be read grants nothing just now.
+   */
+  bool has(const std::string& code);
+
+  /**
+   * As has(), but throwing MissingEntitlement, which names `code`, when the
+   * licence does not grant that entitlement: for work that may run only when
+   * it does.
+   */
+  void require(const std::string& code);
 
   /**
    * Release this device's activation and drop the local licence, keeping only

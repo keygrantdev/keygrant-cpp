@@ -51,6 +51,17 @@ LicenseStatus Engine::status(bool forceOnline) {
   return result;
 }
 
+bool Engine::has(const std::string& code) {
+  try {
+    // From what is stored only, as a status behind an unsettled call answers: no ask, no write.
+    const std::optional<StoredState> state = loadForStatus(true);
+    return state && grants(statusNow(*state, false, true).entitlements, code);
+  } catch (...) {
+    // A state that cannot be read grants nothing just now.
+    return false;
+  }
+}
+
 DeactivateResult Engine::deactivate() {
   DeactivateResult result;
   serial([&](bool readOnly) {
@@ -120,6 +131,7 @@ ActivateResult Engine::activateNow(const std::string& key) {
   if (identity->kind) body["fingerprintKind"] = to_string(*identity->kind);
   if (deviceName_) body["name"] = *deviceName_;
   body["major"] = major_;
+  body["kids"] = kidsJson();
   const std::optional<Reply> reply = post("activate", body);
   if (!reply) return ActivateResult::failure(ActivateError::Network);
   if (reply->status != 200) return ActivateResult::failure(mapServerError(errorWord(reply->body)));
@@ -274,6 +286,15 @@ LicenseStatus License::status(bool forceOnline) {
 }
 
 LicenseStatus License::refresh() { return status(true); }
+
+bool License::has(const std::string& code) {
+  const std::shared_ptr<detail::Engine> engine = engine_;
+  return engine->has(code);
+}
+
+void License::require(const std::string& code) {
+  if (!has(code)) throw MissingEntitlement(code);
+}
 
 DeactivateResult License::deactivate() {
   const std::shared_ptr<detail::Engine> engine = engine_;

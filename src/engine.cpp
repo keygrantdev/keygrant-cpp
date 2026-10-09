@@ -61,7 +61,7 @@ Engine::Engine(LicenseConfig config, const Timings& timings)
       deviceHold_(config.deviceHold),
       httpTimeout_(checkedTimeout(config.httpTimeout)),
       timings_(timings),
-      key_(VerifyingKey::fromJwk(config.publicJwk)),
+      keys_(KeySet::fromJwk(config.publicJwk)),
       a_(withDefaults(std::move(config.adapters), product_)),
       reader_(std::make_shared<DeviceIdentityReader>(a_.fingerprint)) {}
 
@@ -140,7 +140,14 @@ std::optional<Reply> Engine::postTo(const std::shared_ptr<HttpAdapter>& http, co
   return Reply{response->status, parseJsonText(response->body)};
 }
 
-VerifyResult Engine::verify(const std::string& lease, std::int64_t now) const { return verifyLease(lease, key_, now); }
+VerifyResult Engine::verify(const std::string& lease, std::int64_t now) const { return verifyLease(lease, keys_, now); }
+
+/**
+ * The ids of the keys this build carries (`kid`, each key's thumbprint), in
+ * the order configured: sent with each activation, validate and claim, so the
+ * product's dashboard can count the devices whose builds do not carry a key yet.
+ */
+ordered_json Engine::kidsJson() const { return keys_.kids(); }
 
 /** A licence lease verified offline and held to this product and build, its key and activation, on this device. */
 LeaseCheck Engine::evaluate(const std::string& lease, std::int64_t now, const std::optional<std::string>& key,
@@ -317,6 +324,7 @@ ordered_json Engine::validateBody(const StoredState& state, const Device& here) 
   if (state.keptMajor) body["keptMajor"] = *state.keptMajor;
   if (here.canTell) body["fingerprints"] = here.fingerprints;
   if (here.canTell && here.kind) body["fingerprintKind"] = to_string(*here.kind);
+  body["kids"] = kidsJson();
   return body;
 }
 

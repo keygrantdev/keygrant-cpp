@@ -71,10 +71,18 @@ class TestKey {
   /// From a private JWK's `d`.
   static TestKey fromPrivate(const std::string& d);
   std::string publicJwk() const;
+  /// The id a lease names this key by (its thumbprint), as a check-in reports it.
+  std::string kid() const;
+  /// The ids a check-in of a build carrying only this key reports (`kids`).
+  json kids() const;
   /// A compact JWS over the payload's JSON, header {"alg":"EdDSA","typ":"JWT"}.
   std::string sign(const ordered_json& payload) const;
   /// A compact JWS over these exact payload bytes.
   std::string signRaw(const std::string& payload) const;
+  /// A compact JWS over the payload's JSON, its header naming the key `kid`.
+  std::string signNamed(const ordered_json& payload, const std::string& kid) const;
+  /// A compact JWS over this exact signing input (`header.payload`).
+  std::string signInput(const std::string& input) const;
 
  private:
   std::shared_ptr<evp_pkey_st> key_;

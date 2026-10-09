@@ -43,7 +43,7 @@ std::string tamperedLease(const Harness& h) {
   EXPECT_NE(at, std::string::npos) << text;
   text.replace(at, 7, "\"lim\":9");
   const std::string tampered = lease.substr(0, first + 1) + base64UrlEncode(text) + lease.substr(second);
-  const auto key = keygrant::detail::VerifyingKey::fromJwk(h.key.publicJwk());
+  const auto key = keygrant::detail::KeySet::fromJwk(h.key.publicJwk());
   EXPECT_EQ(keygrant::detail::verifyLease(tampered, key, NOW).reason, keygrant::detail::VerifyFailure::BadSignature);
   return tampered;
 }

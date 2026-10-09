@@ -36,7 +36,8 @@ TEST(Status, RenewsOnlineWhenTheLeaseHasExpired) {
   h.http->reply("validate", 200, leaseAnswer(fresh));
   EXPECT_EQ(h.license().status(), licensed(KEY));
   EXPECT_EQ(h.stored()->lease, fresh);
-  EXPECT_EQ(h.http->bodyOf("validate"), json({{"key", KEY}, {"activationId", "act_1"}, {"major", 1}, {"fingerprints", {"fp-test"}}}));
+  EXPECT_EQ(h.http->bodyOf("validate"),
+            json({{"key", KEY}, {"activationId", "act_1"}, {"major", 1}, {"fingerprints", {"fp-test"}}, {"kids", h.key.kids()}}));
 }
 
 TEST(Status, StaysExpiredOfflineWhenAnExpiredLeaseCannotBeRenewed) {

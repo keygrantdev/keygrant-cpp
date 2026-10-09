@@ -7,7 +7,8 @@ namespace {
 /**
  * Whether a lease that does not license here is one the server stands behind:
  * not for this build (`upgrade`, `outdated`) or not for this device
- * (`device`). Not one expired, or not this licence's.
+ * (`device`). Not one expired, not this licence's, or signed by a key this
+ * build does not carry.
  */
 bool standsBehind(LeaseVerdict verdict) {
   switch (verdict) {
@@ -15,7 +16,8 @@ bool standsBehind(LeaseVerdict verdict) {
     case LeaseVerdict::Outdated:
     case LeaseVerdict::Device: return true;
     case LeaseVerdict::Expired:
-    case LeaseVerdict::Tampered: return false;
+    case LeaseVerdict::Tampered:
+    case LeaseVerdict::UnknownKey: return false;
   }
   return false;
 }

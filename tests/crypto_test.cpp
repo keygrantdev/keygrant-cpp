@@ -36,12 +36,13 @@ TEST(Base64Url, RoundTripsEveryLength) {
   }
 }
 
-TEST(Base64Url, ForgivesAConfiguredKeyItsPaddingAndAlphabet) {
-  EXPECT_EQ(text(*base64Forgiving("aGVsbG8=")), "hello");
-  EXPECT_EQ(text(*base64Forgiving(" aGVs\nbG8 ")), "hello");
-  EXPECT_EQ(text(*base64Forgiving("-_8")), "\xfb\xff");
-  EXPECT_FALSE(base64Forgiving("a"));
-  EXPECT_FALSE(base64Forgiving("a!b="));
+TEST(Base64Url, RefusesPaddingTheStandardAlphabetWhiteSpaceAndStrayBits) {
+  EXPECT_EQ(text(*base64UrlDecode("-_8")), "\xfb\xff");
+  EXPECT_FALSE(base64UrlDecode("aGVsbG8="));
+  EXPECT_FALSE(base64UrlDecode("+/8"));
+  EXPECT_FALSE(base64UrlDecode("aGVs bG8"));
+  EXPECT_FALSE(base64UrlDecode("QR"));
+  EXPECT_FALSE(base64UrlDecode("a"));
 }
 
 TEST(Sha256, IsLowercaseHex) {
@@ -71,7 +72,7 @@ TEST(PublicKey, ReadsTheJwkOrItsBareX) {
       x + "=",
   };
   for (const std::string& given : forms) {
-    EXPECT_TRUE(verifyLease(token, VerifyingKey::fromJwk(given), NOW).valid) << given;
+    EXPECT_TRUE(verifyLease(token, KeySet::fromJwk(given), NOW).valid) << given;
   }
 }
 
@@ -101,7 +102,7 @@ TEST(PublicKey, RefusesWhatIsNotAnEd25519PublicKey) {
 class Verify : public ::testing::Test {
  protected:
   TestKey key;
-  VerifyingKey verifying = VerifyingKey::fromJwk(key.publicJwk());
+  KeySet verifying = KeySet::fromJwk(key.publicJwk());
 
   VerifyResult verifyClaims(const ordered_json& claims, std::int64_t now = NOW) {
     return verifyLease(key.sign(claims), verifying, now);

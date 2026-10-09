@@ -35,7 +35,7 @@ struct LeaseClaims {
   std::optional<bool> test;
 };
 
-enum class VerifyFailure { Malformed, BadSignature, BadClaims, Expired };
+enum class VerifyFailure { Malformed, UnknownKey, BadSignature, BadClaims, Expired };
 
 const char* to_string(VerifyFailure failure) noexcept;
 
@@ -70,12 +70,24 @@ std::optional<LeaseClaims> parseClaims(const json& payload);
 json claimsJson(const LeaseClaims& claims);
 
 /**
- * Verify a lease offline, in the reference's order: three parts (else
- * malformed; the header is not read), the signature over `header.payload` as
- * received (else bad-signature; malformed when it cannot be decoded), the
- * claims (else bad-claims), then `exp * 1000 < now` is expired (the claims
- * still given). A lease is still valid AT its `exp` second.
+ * Verify a lease offline against a key set, in the reference's order: three
+ * parts (else malformed); the signature, canonical base64url (else malformed);
+ * the key the header names by its id (`kid`), unknown-key when the set holds
+ * none of that id, or each key in turn for a lease that names none; the
+ * signature over `header.payload` as received (else bad-signature); the claims
+ * (else bad-claims), then `exp * 1000 < now` is expired (the claims still
+ * given). A lease is still valid AT its `exp` second. The header is read for
+ * `kid` only: the algorithm is the verifier's, never the token's.
  */
-VerifyResult verifyLease(std::string_view token, const VerifyingKey& key, std::int64_t now);
+VerifyResult verifyLease(std::string_view token, const KeySet& keys, std::int64_t now);
+
+/**
+ * The key a lease's header names (`kid`), or none. A header names a key only
+ * when it is, byte for byte, the header the server writes for one: canonical
+ * base64url of {"alg":"EdDSA","typ":"JWT","kid":"<kid>"}, <kid> 1 to 64
+ * characters of the base64url alphabet. Any other header names no key. It is
+ * matched as bytes, never parsed.
+ */
+std::optional<std::string> keyIdOf(std::string_view header);
 
 }  // namespace keygrant::detail

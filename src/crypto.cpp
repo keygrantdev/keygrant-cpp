@@ -1,5 +1,7 @@
 #include "crypto.hpp"
 
+#include <algorithm>
+
 #include <openssl/err.h>
 #include <openssl/evp.h>
 
@@ -24,38 +26,6 @@ int sextet(char c) {
 
 bool asciiWhitespace(char c) { return c == '\t' || c == '\n' || c == '\f' || c == '\r' || c == ' '; }
 
-/** WHATWG forgiving-base64 decode, as atob runs it. */
-std::optional<Bytes> forgivingBase64(std::string_view input) {
-  std::string data;
-  data.reserve(input.size());
-  for (char c : input) {
-    if (!asciiWhitespace(c)) data.push_back(c);
-  }
-  if (data.size() % 4 == 0) {
-    if (data.size() >= 2 && data[data.size() - 1] == '=' && data[data.size() - 2] == '=') {
-      data.resize(data.size() - 2);
-    } else if (!data.empty() && data.back() == '=') {
-      data.pop_back();
-    }
-  }
-  if (data.size() % 4 == 1) return std::nullopt;
-  Bytes out;
-  out.reserve(data.size() * 3 / 4);
-  unsigned buffer = 0;
-  int bits = 0;
-  for (char c : data) {
-    const int value = sextet(c);
-    if (value < 0) return std::nullopt;
-    buffer = (buffer << 6) | static_cast<unsigned>(value);
-    bits += 6;
-    if (bits >= 8) {
-      bits -= 8;
-      out.push_back(static_cast<unsigned char>((buffer >> bits) & 0xFFu));
-    }
-  }
-  return out;
-}
-
 struct PkeyDeleter {
   void operator()(EVP_PKEY* key) const { EVP_PKEY_free(key); }
 };
@@ -72,7 +42,17 @@ std::string requireString(const json& jwk, const char* name) {
   return it->get<std::string>();
 }
 
-/** The JWK's `x`, checked as WebCrypto checks an Ed25519 public key it imports for `verify`. */
+/** Whether a JWK's `key_ops` is a list naming "verify". */
+bool namesVerify(const json& ops) {
+  if (!ops.is_array()) return false;
+  return std::any_of(ops.begin(), ops.end(), [](const json& op) { return op.is_string() && op.get<std::string>() == "verify"; });
+}
+
+/**
+ * The JWK's `x`, the JWK checked as every KeyGrant SDK checks one: kty OKP and
+ * crv Ed25519, no private d, use (when given) sig, key_ops (when given) a list
+ * naming verify, alg (when given) EdDSA or Ed25519. No other member is read.
+ */
 std::string jwkX(std::string_view text) {
   const json jwk = json::parse(std::string(text), nullptr, false);
   if (jwk.is_discarded() || !jwk.is_object()) throw std::invalid_argument("publicJwk: not a JSON object");
@@ -86,12 +66,8 @@ std::string jwkX(std::string_view text) {
     if (alg != "EdDSA" && alg != "Ed25519") throw std::invalid_argument("publicJwk: alg is not EdDSA");
   }
   if (jwk.contains("use") && requireString(jwk, "use") != "sig") throw std::invalid_argument("publicJwk: use is not \"sig\"");
-  if (const auto ops = jwk.find("key_ops"); ops != jwk.end()) {
-    bool verifies = false;
-    if (ops->is_array()) {
-      for (const json& op : *ops) verifies = verifies || (op.is_string() && op.get<std::string>() == "verify");
-    }
-    if (!verifies) throw std::invalid_argument("publicJwk: key_ops does not include \"verify\"");
+  if (const auto ops = jwk.find("key_ops"); ops != jwk.end() && !namesVerify(*ops)) {
+    throw std::invalid_argument("publicJwk: key_ops does not include \"verify\"");
   }
   return requireString(jwk, "x");
 }
@@ -124,20 +100,6 @@ std::optional<Bytes> base64UrlDecode(std::string_view input) {
   // Canonical: no stray bits in the last character, so it encodes back to itself.
   if (base64UrlEncode(out.data(), out.size()) != input) return std::nullopt;
   return out;
-}
-
-std::optional<Bytes> base64Forgiving(std::string_view input) {
-  std::string s;
-  s.reserve(input.size());
-  for (char c : input) {
-    if (asciiWhitespace(c)) continue;
-    if (c == '-') c = '+';
-    if (c == '_') c = '/';
-    s.push_back(c);
-  }
-  const std::size_t pad = s.size() % 4 == 0 ? 0 : 4 - s.size() % 4;
-  s.append(pad, '=');
-  return forgivingBase64(s);
 }
 
 std::string base64UrlEncode(const unsigned char* data, std::size_t size) {
@@ -201,8 +163,10 @@ VerifyingKey VerifyingKey::fromJwk(std::string_view jwkOrX) {
   while (to > from && asciiWhitespace(jwkOrX[to - 1])) --to;
   const std::string_view text = jwkOrX.substr(from, to - from);
   if (text.empty()) throw std::invalid_argument("publicJwk is empty");
-  const std::string x = text.front() == '{' ? jwkX(text) : std::string(text);
-  const std::optional<Bytes> raw = base64Forgiving(x);
+  std::string x = text.front() == '{' ? jwkX(text) : std::string(text);
+  // Canonical base64url once the trailing `=` of a key pasted with padding are dropped.
+  while (!x.empty() && x.back() == '=') x.pop_back();
+  const std::optional<Bytes> raw = base64UrlDecode(x);
   if (!raw || raw->size() != 32) throw std::invalid_argument("publicJwk: x is not a 32-byte base64url Ed25519 key");
   EVP_PKEY* key = EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, nullptr, raw->data(), raw->size());
   if (key == nullptr) {
@@ -211,6 +175,54 @@ VerifyingKey VerifyingKey::fromJwk(std::string_view jwkOrX) {
   }
   VerifyingKey out;
   out.key_ = std::shared_ptr<EVP_PKEY>(key, PkeyDeleter{});
+  const Bytes digest =
+      sha256("{\"crv\":\"Ed25519\",\"kty\":\"OKP\",\"x\":\"" + base64UrlEncode(raw->data(), raw->size()) + "\"}");
+  out.kid_ = base64UrlEncode(digest.data(), digest.size());
+  return out;
+}
+
+namespace {
+
+/**
+ * The JWKs of a key set's text: its `keys` list ({"keys":[...]}) or the list it
+ * is ([...]), or none when it is one key (a JWK or its bare `x`).
+ */
+std::optional<json> jwkList(std::string_view text) {
+  std::size_t from = 0;
+  while (from < text.size() && asciiWhitespace(text[from])) ++from;
+  if (from == text.size() || (text[from] != '[' && text[from] != '{')) return std::nullopt;
+  const json parsed = json::parse(std::string(text), nullptr, false);
+  if (text[from] == '[') {
+    if (parsed.is_discarded() || !parsed.is_array()) throw std::invalid_argument("publicJwk: not a JSON list of keys");
+    // In place: MSVC finds a json's own conversions ambiguous for optional<json>'s converting constructor.
+    return std::optional<json>(std::in_place, parsed);
+  }
+  if (!parsed.is_object() || !parsed.contains("keys")) return std::nullopt;
+  if (!parsed["keys"].is_array()) throw std::invalid_argument("publicJwk: its keys are not a list");
+  return std::optional<json>(std::in_place, parsed["keys"]);
+}
+
+}  // namespace
+
+KeySet KeySet::fromJwk(std::string_view text) {
+  KeySet out;
+  const auto add = [&out](VerifyingKey key) {
+    const bool held = std::any_of(out.keys_.begin(), out.keys_.end(), [&](const VerifyingKey& k) { return k.kid() == key.kid(); });
+    if (!held) out.keys_.push_back(std::move(key));
+  };
+  const std::optional<json> list = jwkList(text);
+  if (!list) add(VerifyingKey::fromJwk(text));
+  for (const json& jwk : list.value_or(json::array())) {
+    if (!jwk.is_object()) throw std::invalid_argument("publicJwk: a key is not a JSON object");
+    add(VerifyingKey::fromJwk(jwk.dump()));
+  }
+  if (out.keys_.empty()) throw std::invalid_argument("publicJwk: the key set holds no key");
+  return out;
+}
+
+std::vector<std::string> KeySet::kids() const {
+  std::vector<std::string> out;
+  for (const VerifyingKey& key : keys_) out.push_back(key.kid());
   return out;
 }
 

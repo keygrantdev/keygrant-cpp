@@ -20,8 +20,8 @@ void take(const json& patch, const char* name, Change<T>& change, Read read) {
 
 }  // namespace
 
-const VerifyingKey& vectorsKey() {
-  static const VerifyingKey key = VerifyingKey::fromJwk(vectors()["publicJwk"].dump());
+const KeySet& vectorsKey() {
+  static const KeySet key = KeySet::fromJwk(vectors()["publicJwk"].dump());
   return key;
 }
 
@@ -220,7 +220,7 @@ LeaseClaims claimsWith(const json& given) {
 
 LeaseVerdict verdictFrom(const std::string& word) {
   for (const LeaseVerdict verdict : {LeaseVerdict::Expired, LeaseVerdict::Upgrade, LeaseVerdict::Outdated,
-                                     LeaseVerdict::Tampered, LeaseVerdict::Device}) {
+                                     LeaseVerdict::Tampered, LeaseVerdict::UnknownKey, LeaseVerdict::Device}) {
     if (word == to_string(verdict)) return verdict;
   }
   ADD_FAILURE() << "a lease verdict this harness does not know: " << word;

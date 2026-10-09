@@ -116,6 +116,7 @@ const char* to_string(LeaseVerdict verdict) noexcept {
     case LeaseVerdict::Upgrade: return "upgrade";
     case LeaseVerdict::Outdated: return "outdated";
     case LeaseVerdict::Tampered: return "tampered";
+    case LeaseVerdict::UnknownKey: return "unknown-key";
     case LeaseVerdict::Device: return "device";
   }
   return "tampered";
@@ -125,7 +126,8 @@ bool sameKey(const std::string& a, const std::string& b) { return jsUpper(a) == 
 
 LeaseCheck checkLease(const VerifyResult& v, const std::string& product, std::int64_t major, const LeaseHolder& holder) {
   if (!v.valid || !v.claims) {
-    return refused(v.reason == VerifyFailure::Expired ? LeaseVerdict::Expired : LeaseVerdict::Tampered);
+    if (v.reason == VerifyFailure::Expired) return refused(LeaseVerdict::Expired);
+    return refused(v.reason == VerifyFailure::UnknownKey ? LeaseVerdict::UnknownKey : LeaseVerdict::Tampered);
   }
   const LeaseClaims& c = *v.claims;
   if (c.product != product) return refused(LeaseVerdict::Tampered);
@@ -160,6 +162,7 @@ LicenseStatus leaseStatus(const LeaseCheck& check, const std::optional<std::stri
     case LeaseVerdict::Upgrade: return invalidStatus(LicenseReason::Upgrade, key);
     case LeaseVerdict::Outdated: return invalidStatus(LicenseReason::Outdated, key);
     case LeaseVerdict::Device: return invalidStatus(LicenseReason::Device, key);
+    case LeaseVerdict::UnknownKey: return invalidStatus(LicenseReason::UnknownKey, key);
     case LeaseVerdict::Tampered: break;
   }
   // Not this licence at all: no key to show.

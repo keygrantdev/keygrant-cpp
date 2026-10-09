@@ -177,7 +177,8 @@ TEST(Pickup, SavesABoughtKeyExactlyAsActivateDoesClearsTheTokenAndAnswersLicense
                                            {"fingerprint", "fp-test"},
                                            {"fingerprints", {"fp-test"}},
                                            {"name", "Rae\xE2\x80\x99s laptop"},
-                                           {"major", 1}}));
+                                           {"major", 1},
+                                           {"kids", h.key.kids()}}));
   const StoredState stored = *h.stored();
   EXPECT_EQ(stored.key, BOUGHT_KEY);
   EXPECT_EQ(stored.activationId, "act_1");
@@ -332,7 +333,8 @@ TEST(PickupAtStartTrial, ReadsTheDeviceOnceForBothAsksAndMayClaimUnderTheHostNam
                   {"fingerprint", "fp-host"},
                   {"fingerprintKind", "hostname"},
                   {"fingerprints", {"fp-host"}},
-                  {"major", 1}}));
+                  {"major", 1},
+                  {"kids", h.key.kids()}}));
 }
 
 TEST(Pickup, AnswersABoughtKeyEvenWhenTheDiskRefusesItAndTheNextStatusAsksAgainWithTheSameFingerprints) {
@@ -360,7 +362,7 @@ TEST(Pickup, SendsEveryFingerprintTheRunReadWhenTheDeviceIsNotHeldToo) {
   h.license().status();
   // Its own and the host name, and no kind: a device not held is keyed by nothing.
   EXPECT_EQ(h.http->bodyOf("claim"),
-            json({{"token", TOKEN}, {"fingerprint", "fp-own"}, {"fingerprints", {"fp-own", "fp-host"}}, {"major", 1}}));
+            json({{"token", TOKEN}, {"fingerprint", "fp-own"}, {"fingerprints", {"fp-own", "fp-host"}}, {"major", 1}, {"kids", h.key.kids()}}));
 }
 
 TEST(Pickup, SendsAtMostFourFingerprintsOwnFirstEachOfOneTo200Characters) {

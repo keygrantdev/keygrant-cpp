@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(keygrant
-  VERSION 0.2.0
+  VERSION 0.3.0
   DESCRIPTION "KeyGrant licensing SDK for native desktop apps"
   LANGUAGES CXX)
 
@@ -114,6 +114,7 @@ if(KEYGRANT_BUILD_TESTS)
   # The tests' own TLS server (the libcurl adapter's TLS and redirects).
   find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto SSL)
   add_executable(keygrant_tests
+    tests/conformance_keys_test.cpp
     tests/conformance_purchase_test.cpp
     tests/conformance_support.cpp
     tests/conformance_test.cpp
@@ -123,6 +124,7 @@ if(KEYGRANT_BUILD_TESTS)
     tests/license_activate_test.cpp
     tests/license_device_test.cpp
     tests/license_entitlements_test.cpp
+    tests/license_keyset_test.cpp
     tests/license_pickup_test.cpp
     tests/license_purchase_test.cpp
     tests/license_renewal_test.cpp

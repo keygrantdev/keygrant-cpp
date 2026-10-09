@@ -1,5 +1,7 @@
 #include "lease.hpp"
 
+#include <algorithm>
+
 #include "utf.hpp"
 
 namespace keygrant::detail {
@@ -64,6 +66,7 @@ json entitlementsJson(const std::map<std::string, Entitlement>& entitlements) {
 const char* to_string(VerifyFailure failure) noexcept {
   switch (failure) {
     case VerifyFailure::Malformed: return "malformed";
+    case VerifyFailure::UnknownKey: return "unknown-key";
     case VerifyFailure::BadSignature: return "bad-signature";
     case VerifyFailure::BadClaims: return "bad-claims";
     case VerifyFailure::Expired: return "expired";
@@ -142,36 +145,74 @@ json claimsJson(const LeaseClaims& c) {
   return out;
 }
 
-VerifyResult verifyLease(std::string_view token, const VerifyingKey& key, std::int64_t now) {
+std::optional<std::string> keyIdOf(std::string_view header) {
+  static constexpr std::string_view kStart = R"({"alg":"EdDSA","typ":"JWT","kid":")";
+  static constexpr std::string_view kEnd = R"("})";
+  const std::optional<Bytes> bytes = base64UrlDecode(header);
+  if (!bytes) return std::nullopt;
+  const std::string text(bytes->begin(), bytes->end());
+  // Long enough for both ends apart: `..."kid":"}` ends with `"}` only through the start's own quote.
+  if (text.size() < kStart.size() + kEnd.size()) return std::nullopt;
+  if (text.compare(0, kStart.size(), kStart) != 0 || text.compare(text.size() - kEnd.size(), kEnd.size(), kEnd) != 0) {
+    return std::nullopt;
+  }
+  const std::string kid = text.substr(kStart.size(), text.size() - kStart.size() - kEnd.size());
+  const auto base64url = [](unsigned char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+  };
+  if (kid.empty() || kid.size() > 64 || !std::all_of(kid.begin(), kid.end(), base64url)) return std::nullopt;
+  return kid;
+}
+
+namespace {
+
+/**
+ * The keys a lease is verified by: the one its header names (none when the set
+ * lacks it), else each key of the set in turn.
+ */
+std::vector<const VerifyingKey*> candidatesFor(std::string_view header, const KeySet& keys) {
+  const std::optional<std::string> kid = keyIdOf(header);
+  std::vector<const VerifyingKey*> candidates;
+  for (const VerifyingKey& key : keys.keys()) {
+    if (!kid || key.kid() == *kid) candidates.push_back(&key);
+  }
+  return candidates;
+}
+
+/// The payload's claims, or none when it is not canonical base64url of the claims' JSON.
+std::optional<LeaseClaims> claimsOf(std::string_view payload) {
+  const std::optional<Bytes> decoded = base64UrlDecode(payload);
+  if (!decoded) return std::nullopt;
+  return parseClaims(parseJsonText(std::string(decoded->begin(), decoded->end())));
+}
+
+VerifyResult failed(VerifyFailure reason) {
   VerifyResult result;
+  result.reason = reason;
+  return result;
+}
+
+}  // namespace
+
+VerifyResult verifyLease(std::string_view token, const KeySet& keys, std::int64_t now) {
   const std::size_t first = token.find('.');
   const std::size_t second = first == std::string_view::npos ? first : token.find('.', first + 1);
   if (second == std::string_view::npos || token.find('.', second + 1) != std::string_view::npos) {
-    result.reason = VerifyFailure::Malformed;
-    return result;
+    return failed(VerifyFailure::Malformed);
   }
-  const std::string_view signingInput = token.substr(0, second);
-  const std::string_view payload = token.substr(first + 1, second - first - 1);
   const std::optional<Bytes> signature = base64UrlDecode(token.substr(second + 1));
-  if (!signature) {
-    result.reason = VerifyFailure::Malformed;
-    return result;
-  }
+  if (!signature) return failed(VerifyFailure::Malformed);
+  // The key the header names, else each key in turn; one it names that the set lacks is told apart.
+  const std::vector<const VerifyingKey*> candidates = candidatesFor(token.substr(0, first), keys);
+  if (candidates.empty()) return failed(VerifyFailure::UnknownKey);
   // The signing input is the token's own text, as received (TextEncoder of the JS string).
-  if (!key.verify(sanitizeUtf8(signingInput), *signature)) {
-    result.reason = VerifyFailure::BadSignature;
-    return result;
-  }
-  const std::optional<Bytes> decoded = base64UrlDecode(payload);
-  std::optional<LeaseClaims> claims;
-  if (decoded) {
-    const std::string text(decoded->begin(), decoded->end());
-    claims = parseClaims(parseJsonText(text));
-  }
-  if (!claims) {
-    result.reason = VerifyFailure::BadClaims;
-    return result;
-  }
+  const std::string signedInput = sanitizeUtf8(token.substr(0, second));
+  const bool holds = std::any_of(candidates.begin(), candidates.end(),
+                                 [&](const VerifyingKey* key) { return key->verify(signedInput, *signature); });
+  if (!holds) return failed(VerifyFailure::BadSignature);
+  std::optional<LeaseClaims> claims = claimsOf(token.substr(first + 1, second - first - 1));
+  if (!claims) return failed(VerifyFailure::BadClaims);
+  VerifyResult result;
   // exp is at most 2^53 - 1 seconds: times 1000 it still fits.
   if (claims->exp * 1000 < now) {
     result.reason = VerifyFailure::Expired;

@@ -32,7 +32,7 @@ TEST(Activate, SendsNoNameWhenTheAppGivesNone) {
   h.http->reply("activate", 200, leaseAnswer(h.sign(KEY, "perpetual", 30 * 24 * 3600)));
   h.license().activate(KEY);
   EXPECT_FALSE(h.http->bodyOf("activate").contains("name"));
-  EXPECT_EQ(h.http->bodyOf("activate"), json({{"key", KEY}, {"fingerprint", "fp-test"}, {"major", 1}}));
+  EXPECT_EQ(h.http->bodyOf("activate"), json({{"key", KEY}, {"fingerprint", "fp-test"}, {"major", 1}, {"kids", h.key.kids()}}));
 }
 
 TEST(Activate, RefusesAKeyThatCannotBeOneWithoutAskingAnybody) {

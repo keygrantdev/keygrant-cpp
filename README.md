@@ -29,7 +29,7 @@ major can hold). The full guide is at https://keygrant.dev/docs.
 include(FetchContent)
 FetchContent_Declare(keygrant
   GIT_REPOSITORY https://github.com/keygrantdev/keygrant-cpp.git
-  GIT_TAG        0.2.0)
+  GIT_TAG        0.3.0)
 FetchContent_MakeAvailable(keygrant)
 
 target_link_libraries(my_app PRIVATE keygrant::keygrant)
@@ -39,7 +39,7 @@ or, with the repository vendored, `add_subdirectory(third_party/keygrant)`. Buil
 SDK builds no tests and never adds `-Werror` to your build.
 
 OpenSSL 3, libcurl and nlohmann/json must be findable by `find_package`. Installed (`cmake --install`), the SDK
-is a package: `find_package(keygrant 0.2 REQUIRED)` (a static install finds OpenSSL and CURL again for you).
+is a package: `find_package(keygrant 0.3 REQUIRED)` (a static install finds OpenSSL and CURL again for you).
 
 ### vcpkg (Windows, macOS)
 
@@ -116,6 +116,7 @@ come from any number of threads (below).
 | `Invalid` | `Outdated` | This build is older than the key's lowest version: update the app. |
 | `Invalid` | `Device` | The licence was activated on another device: activate on this one. |
 | `Invalid` | `Tampered` | The stored lease is not this licence (another key, product or signer). |
+| `Invalid` | `UnknownKey` | The stored lease is signed by a key this build does not carry. Online, the server renews it with the key it signs with now; when it stays so online, update the app. |
 | `Unknown` | `Storage` | The licence file could not be read just now: keep running, ask again. |
 | `Unlicensed` | | Nothing activated, no trial. |
 
@@ -222,20 +223,30 @@ called: a change to the trial's length or entitlements reaches a running trial t
 |---|---|---|
 | `product` | (required) | Your product's slug. |
 | `apiBaseUrl` | (required) | `https://api.keygrant.dev`. |
-| `publicJwk` | (required) | Your product's public key: the JWK JSON, or its bare `x`. A private key is refused. |
+| `publicJwk` | (required) | Your product's public keys: the key set (`{"keys":[...]}`), a JSON list of JWKs, one JWK, or its bare `x`. A private key is refused. |
 | `major` | `1` | This build's major version, at most 99999. Set it: a key's coverage is judged by it. Read as KeyGrant's server reads a version: a 0.x build (`major = 0`) is major 1, and so is anything below 1. |
 | `deviceName` | none | Shown in the customer's device list; cut to 120 UTF-16 units. |
 | `deviceHold` | `true` | Whether a licence is held to its device (below). |
 | `httpTimeout` | 15 s | How long any request may take; the SDK holds every request to it itself. |
 | `adapters` | defaults | Storage, registry stash, clock, fingerprinter, HTTP (below). |
 
-### Embedding the public key
+### Embedding the public keys
 
-`publicJwk` is the product's public key as a JWK: the `publicJwk` field of
-`GET https://api.keygrant.dev/v1/products/<slug>/pubkey` (public, no API key), fetched once and shipped with the
-app, in your source or a resource file. The dashboard's Signing key tab shows the same key as SPKI and PEM, which
-the SDK does not take. The key is public (anyone may verify a lease with it); never embed the private key: the
-constructor refuses a JWK with `d`. A wrong key shows up at once: `activate()` answers `InvalidLease`.
+`publicJwk` is the product's key set: the `keys` of `GET https://api.keygrant.dev/v1/products/<slug>/pubkey`
+(public, no API key) as `{"keys":[...]}` (or that whole answer), which the dashboard's Signing key tab also copies
+(Copy key set). Fetch it when you build and ship it with the app, in your source or a resource file. One key alone,
+its JWK or its bare `x`, still works: a set of one. The keys are public (anyone may verify a lease with them); never
+embed a private key: the constructor refuses a JWK with `d`. A wrong key shows up at once: `activate()` answers
+`InvalidLease`.
+
+**Why a set.** A lease names the key that signed it (`kid` in its header, the key's RFC 7638 thumbprint, which the
+SDK computes from the key itself). It is verified by that key; a lease that names none (every lease signed before key
+sets) by each key in turn; and one naming a key the build does not carry is refused (`UnknownKey`). When the product
+rotates its signing key, it first *stages* the next key, published beside the current one while every lease is still
+signed with the current key. Ship builds carrying both; once they are out, the product *switches*, and those builds
+verify every lease signed after it. Embed the whole set each time you build. Each activation, validate and claim
+reports the ids of the keys the build carries (`kids`), so the dashboard can count the devices still on builds
+without the staged key before you switch.
 
 ### deviceHold
 
@@ -252,7 +263,7 @@ real key and licenses the app like any other, for at most 30 days. `status.test`
 
 ### Entitlements
 
-What a licence grants beyond the base product (an edition, a number of seats, a feature) is signed into its lease
+What a licence grants beyond the base product (an edition, a number of seats, an add-on) is signed into its lease
 (the `ent` claim), and a status hands it to the app as `status.entitlements`, a
 `std::map<std::string, keygrant::Entitlement>`:
 
@@ -279,6 +290,20 @@ const bool pro = edition != status.entitlements.end() && edition->second == "pro
 - No caps are enforced (how many there are, how long a name or a text is): the lease's signature already vouches for
   what the server signed.
 - The map is the status's own copy: changing it changes nothing the next status says.
+
+To ask whether the licence grants an entitlement, name its code:
+
+```cpp
+if (license.has("cloud_sync")) enableCloudSync();
+license.require("export");  // throws keygrant::MissingEntitlement (entitlement() is "export")
+```
+
+`has(code)` is true for a flag that is on, a number that is not zero, or a text that is not empty; false for anything
+else, and for a code the lease does not grant (matched exactly, byte for byte). It is answered offline from the stored
+lease only, as `status()` would answer from what is stored, with no request and no write: a licence that does not
+license this build, or none at all, grants nothing; a running trial grants what its trial lease does. It never
+throws. `require(code)` throws `keygrant::MissingEntitlement`, naming the code, when `has` would be false.
+`keygrant::grants(status.entitlements, code)` answers the same of a status already in hand.
 
 ## Where the state is kept
 
@@ -383,7 +408,7 @@ Where this SDK differs from the Electron SDK, and why:
 - **Bad configuration throws at construction** (`std::invalid_argument`): a JWK that is not an Ed25519 public key
   (a private one included), an empty or path-like `product`, an `apiBaseUrl` that is not http(s), a `major` above
   99999 (the server refuses one in every request), a non-positive `httpTimeout`. The reference takes
-  anything and fails every call later. The JWK's `x` is read leniently (padding, the standard alphabet).
+  anything and fails every call later. The JWK's `x` is canonical base64url; trailing padding is allowed.
 - **The machine id is read through the OS API, not a command**: `RegGetValueW` (`RRF_SUBKEY_WOW6464KEY`, falling
   back to `RegOpenKeyExW` with `KEY_WOW64_64KEY`) instead of `reg.exe`; IOKit (`IOServiceGetMatchingService`,
   `IORegistryEntryCreateCFProperty`) instead of `ioreg`. The value is taken as the reference takes it out of their

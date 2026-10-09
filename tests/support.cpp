@@ -89,9 +89,21 @@ std::string TestKey::publicJwk() const {
   return jwk.dump();
 }
 
+std::string TestKey::kid() const { return keygrant::detail::VerifyingKey::fromJwk(publicJwk()).kid(); }
+
+json TestKey::kids() const { return json::array({kid()}); }
+
+std::string TestKey::signNamed(const ordered_json& payload, const std::string& kid) const {
+  const ordered_json header = {{"alg", "EdDSA"}, {"typ", "JWT"}, {"kid", kid}};
+  return signInput(keygrant::detail::base64UrlEncode(header.dump()) + "." + keygrant::detail::base64UrlEncode(payload.dump()));
+}
+
 std::string TestKey::signRaw(const std::string& payload) const {
   const std::string header = keygrant::detail::base64UrlEncode(std::string(R"({"alg":"EdDSA","typ":"JWT"})"));
-  const std::string input = header + "." + keygrant::detail::base64UrlEncode(payload);
+  return signInput(header + "." + keygrant::detail::base64UrlEncode(payload));
+}
+
+std::string TestKey::signInput(const std::string& input) const {
   EVP_MD_CTX* ctx = EVP_MD_CTX_new();
   unsigned char signature[64];
   std::size_t size = sizeof signature;

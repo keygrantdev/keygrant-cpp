@@ -17,8 +17,8 @@
 
 namespace kgtest {
 
-/** The conformance vectors' public key. */
-const keygrant::detail::VerifyingKey& vectorsKey();
+/** The conformance vectors' public key, as the key set of one every group but keySets verifies with. */
+const keygrant::detail::KeySet& vectorsKey();
 
 /** A group of the file, a test failure when it is missing or empty. */
 const json& group(const char* name);
