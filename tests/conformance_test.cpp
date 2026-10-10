@@ -14,7 +14,6 @@
 #include "lease.hpp"
 #include "machine_id.hpp"
 #include "offline.hpp"
-#include "pickup.hpp"
 #include "renewal.hpp"
 #include "state_json.hpp"
 #include "support.hpp"
@@ -36,9 +35,8 @@ TEST(Conformance, EveryGroupInTheFileIsReplayedHere) {
       "trimDeviceName", "noAnswer",      "parseLeaseBody",    "parseTrialBody", "mountinfo",
       "machineIds",   "renewals",        "validLeaseAsks",    "devices",        "identities",
       "savedLastSeen", "leaseStatuses",  "trialLeaseStatuses", "entitlementNumbers",
-      // Added with the purchase from the trial: conformance_purchase_test.cpp.
-      "majors",       "purchaseUrls",    "purchaseTokenKept", "claimDue",       "parseClaimBody",
-      "claimOutcomes", "trialReportDue",  "purchaseReferences", "claimBodies",
+      // The groups after the first ones: conformance_later_test.cpp.
+      "majors",       "referencedLinks", "trialReportDue",
       // Added with key sets and the entitlement helpers: conformance_keys_test.cpp.
       "keyIds",       "keySets",         "grants"};
   std::set<std::string> inFile;
@@ -60,10 +58,8 @@ TEST(Conformance, TheConstantsAreTheReferences) {
                                             "CLOCK_TOLERANCE_MS", "STATUS_CHECK_TIMEOUT_MS", "DEFAULT_HTTP_TIMEOUT_MS",
                                             "LOCK_GRACE_MS", "MACHINE_ID_TIMEOUT_MS", "ACTIVATE_MACHINE_ID_TIMEOUT_MS",
                                             "BOOT_SLACK_MS", "MAX_DEVICE_NAME", "MAX_KEY", "KEEP_CORRUPT",
-                                            "STALE_TEMP_MS", "UPDATE_ATTEMPTS", "UNKNOWN_HOST", "CLAIM_WAIT_MS",
-                                            "PURCHASE_TOKEN_MS", "TRIAL_REPORT_MS", "PURCHASE_REFERENCE_PREFIX",
-                                            "CLAIM_EAGER_MS", "MAX_CLAIM_FINGERPRINTS",
-                                            "MAX_CLAIM_FINGERPRINT_LENGTH"}));
+                                            "STALE_TEMP_MS", "UPDATE_ATTEMPTS", "UNKNOWN_HOST",
+                                            "TRIAL_REPORT_MS"}));
   const keygrant::detail::Timings timings;
   EXPECT_EQ(c["OPEN_MAJOR"], keygrant::kOpenMajor);
   EXPECT_EQ(c["ASK_AGAIN_MS"], kAskAgainMs);
@@ -84,13 +80,7 @@ TEST(Conformance, TheConstantsAreTheReferences) {
   EXPECT_EQ(c["STALE_TEMP_MS"], keygrant::kStaleTempMs);
   EXPECT_EQ(c["UPDATE_ATTEMPTS"], keygrant::kUpdateAttempts);
   EXPECT_EQ(c["UNKNOWN_HOST"], keygrant::kUnknownHost);
-  EXPECT_EQ(c["CLAIM_WAIT_MS"], kClaimWaitMs);
-  EXPECT_EQ(c["PURCHASE_TOKEN_MS"], kPurchaseTokenMs);
   EXPECT_EQ(c["TRIAL_REPORT_MS"], kTrialReportMs);
-  EXPECT_EQ(c["PURCHASE_REFERENCE_PREFIX"], kPurchaseReferencePrefix);
-  EXPECT_EQ(c["CLAIM_EAGER_MS"], kClaimEagerMs);
-  EXPECT_EQ(c["MAX_CLAIM_FINGERPRINTS"], kMaxClaimFingerprints);
-  EXPECT_EQ(c["MAX_CLAIM_FINGERPRINT_LENGTH"], kMaxClaimFingerprintLength);
 }
 
 TEST(Conformance, Leases) {
@@ -201,8 +191,8 @@ TEST(Conformance, Patches) {
   for (const json& v : group("leasePatches")) {
     SCOPED_TRACE(nameOf(v));
     const std::string name = v["patch"].get<std::string>();
-    EXPECT_TRUE(name == "LEASED" || name == "UNKEYED" || name == "NO_PURCHASE") << name;
-    const StatePatch patch = name == "LEASED" ? leasedPatch() : name == "UNKEYED" ? unkeyedPatch() : noPurchasePatch();
+    EXPECT_TRUE(name == "LEASED" || name == "UNKEYED") << name;
+    const StatePatch patch = name == "LEASED" ? leasedPatch() : unkeyedPatch();
     EXPECT_EQ(patchJson(patch), v["expect"]);
   }
   for (const json& v : group("keyedBy")) {

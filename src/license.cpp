@@ -76,25 +76,17 @@ LicenseStatus Engine::startTrial() {
   LicenseStatus result;
   bool stalled = false;
   try {
-    // It may make two requests (a claim bounded as a status check is, then the
-    // trial ask): the calls behind it wait that much longer (serial).
-    serial(
-        [&](bool readOnly) {
-          stalled = readOnly;
-          const std::optional<StoredState> state = loadForStatus(readOnly);
-          if (!state) {
-            result = unreadable();
-          } else if (!readOnly) {
-            // The device read once, given an activation's time, for both asks.
-            const Device here = device(timings_.activateMachineId, state->deviceKind);
-            // A key bought through purchaseUrl is asked for first; bought, it is the answer, and no trial is asked.
-            const Pickup picked = pickUp(*state, PickupAsk{true, true, &here});
-            result = picked.status ? *picked.status : startTrialNow(picked.state, here);
-          } else {
-            result = trialStatus(*state, effectiveNow(*state));
-          }
-        },
-        timings_.statusCheck);
+    serial([&](bool readOnly) {
+      stalled = readOnly;
+      const std::optional<StoredState> state = loadForStatus(readOnly);
+      if (!state) {
+        result = unreadable();
+      } else if (!readOnly) {
+        result = startTrialNow(*state);
+      } else {
+        result = trialStatus(*state, effectiveNow(*state));
+      }
+    });
   } catch (...) {
     result = unreadable();
   }
@@ -143,9 +135,6 @@ ActivateResult Engine::activateNow(const std::string& key) {
                                      [this](const StatePatch& patch, std::int64_t guard) { save(patch, guard); });
   const LeaseCheck evaluated = evaluate(lease, now, entered, activationId, identity->kind);
   if (!evaluated.ok) return ActivateResult::failure(ActivateError::InvalidLease);
-  // As a bought key's claim saves one (activationPatch), the purchase secret
-  // cleared too: else a later deactivate would let a pending pickup activate
-  // the device again, on a key the customer may have meant for another machine.
   const StatePatch patch =
       activationPatch(Activation{*entered, activationId, lease, *evaluated.claims, now, major_, identity->kind});
   Basis basis;
@@ -169,9 +158,8 @@ DeactivateResult Engine::deactivateNow() {
     const std::optional<Reply> reply = post("deactivate", body);
     result.released = reply && reply->status == 200;
   }
-  // Stamped, so that an answer to an older ask is not saved over it; the
-  // purchase secret goes too (noPurchasePatch), as an activation clears it.
-  StatePatch patch = unkeyedPatch() + noPurchasePatch();
+  // Stamped, so that an answer to an older ask is not saved over it.
+  StatePatch patch = unkeyedPatch();
   patch.verdictAt = Change<std::int64_t>::set(effectiveNow(state));
   save(patch);
   return result;
@@ -203,10 +191,7 @@ LicenseStatus Engine::statusNow(const StoredState& state, bool forceOnline, bool
   if (refused && readOnly) return invalidStatus(reasonOf(*refused), state.key);
   if (refused) return refusedStatus(state, *refused, forceOnline);
   if (truthy(state.key) && truthy(state.lease)) return licenseStatus(state, *state.lease, now, forceOnline, readOnly);
-  // No licence held: a key bought through purchaseUrl is picked up first (pickUp), never read-only.
-  const Pickup picked = readOnly ? Pickup{std::nullopt, state} : pickUp(state, PickupAsk{false, forceOnline});
-  if (picked.status) return *picked.status;
-  if (picked.state.trialStart) return trialStatus(picked.state, now, StatusAsk{forceOnline, readOnly});
+  if (state.trialStart) return trialStatus(state, now, StatusAsk{forceOnline, readOnly});
   return unlicensed();
 }
 
@@ -309,11 +294,6 @@ LicenseStatus License::startTrial() {
 std::optional<std::string> License::upgradeUrl(const std::string& paymentLink) {
   const std::shared_ptr<detail::Engine> engine = engine_;
   return engine->upgradeUrl(paymentLink);
-}
-
-std::optional<std::string> License::purchaseUrl(const std::string& paymentLink) {
-  const std::shared_ptr<detail::Engine> engine = engine_;
-  return engine->purchaseUrl(paymentLink);
 }
 
 }  // namespace keygrant

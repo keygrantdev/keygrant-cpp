@@ -14,7 +14,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(KEYGRANT_SOURCE_DIR)
   add_subdirectory(${KEYGRANT_SOURCE_DIR} keygrant)
 else()
-  find_package(keygrant 0.3 REQUIRED)
+  find_package(keygrant 0.4 REQUIRED)
 endif()
 
 add_executable(consumer main.cpp entitlement_literals.cpp)

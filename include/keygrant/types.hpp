@@ -317,12 +317,6 @@ struct StoredState {
   std::optional<std::int64_t> verdictAt;
   /// The default storage's revision of this state, one more on every save.
   std::optional<std::int64_t> rev;
-  /// The one-time purchase SECRET License::purchaseUrl keeps while no key is held; a link carries only its hash.
-  std::optional<std::string> purchaseToken;
-  /// When (guarded clock) purchaseUrl last handed out that secret's link.
-  std::optional<std::int64_t> purchaseTokenAt;
-  /// When (device clock) the key bought with it was last asked for and none came back.
-  std::optional<std::int64_t> claimAskedAt;
   /// When (guarded clock) a running trial last reported its launch.
   std::optional<std::int64_t> trialReportedAt;
   /**
@@ -365,10 +359,7 @@ class IoError : public std::runtime_error {
   std::string code_;
 };
 
-/**
- * deactivate() behind a call that has not finished (nothing was released or
- * dropped), or purchaseUrl() behind one with no purchase secret held.
- */
+/** deactivate() behind a call that has not finished (nothing was released or dropped). */
 class StalledError : public std::runtime_error {
  public:
   StalledError();

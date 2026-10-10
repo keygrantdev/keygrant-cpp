@@ -65,9 +65,8 @@ struct ActivationIdentity {
 };
 
 /**
- * The fingerprint an activation is made under (a typed key's, or a bought
- * key's claim), and what it hashes; or none: an activation answers `network`
- * for the app to retry, and a claim is not asked.
+ * The fingerprint an activation is made under, and what it hashes; or none:
+ * an activation answers `network` for the app to retry.
  *
  * The device's own, given the time an activation deserves. When even that
  * cannot be told: on an install already keyed by a machine id (`install`),

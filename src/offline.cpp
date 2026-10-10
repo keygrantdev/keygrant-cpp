@@ -9,7 +9,7 @@
 #define KEYGRANT_STATE_FIELDS(X)                                                                          \
   X(key) X(activationId) X(lease) X(trialStart) X(trialEndsAt) X(trialLease) X(trialAt) X(lastSeen)     \
   X(checkedMajor) X(keptMajor) X(backoffSince) X(backoffMs) X(refused) X(refusedMajor) X(refusedFor) \
-  X(deviceKind) X(verdictAt) X(rev) X(purchaseToken) X(purchaseTokenAt) X(claimAskedAt) X(trialReportedAt)
+  X(deviceKind) X(verdictAt) X(rev) X(trialReportedAt)
 
 namespace keygrant::detail {
 
@@ -293,15 +293,6 @@ StoredState merged(const StoredState& latest, const StatePatch& patch, const Bas
     keepOut(applied.trialLease);
     keepOut(applied.trialAt);
   }
-  const bool aboutStored = basis.purchase && latest.purchaseToken == basis.purchase->token &&
-                           (!basis.purchase->at || latest.purchaseTokenAt == basis.purchase->at);
-  if (basis.purchase && !aboutStored) {
-    // About a secret no longer stored (or, for a wait, one whose link was handed
-    // out again since): another process's new one, or its cleared wait, stays.
-    keepOut(applied.purchaseToken);
-    keepOut(applied.purchaseTokenAt);
-    keepOut(applied.claimAskedAt);
-  }
   const std::optional<std::int64_t> trialStart = earliest({latest.trialStart, applied.trialStart.get()});
   StoredState result = latest;
   apply(result, applied);
@@ -345,11 +336,16 @@ StatePatch unkeyedPatch() {
   return patch + leasedPatch();
 }
 
-StatePatch noPurchasePatch() {
+StatePatch activationPatch(const Activation& a) {
   StatePatch patch;
-  patch.purchaseToken = Change<std::string>::clear();
-  patch.purchaseTokenAt = Change<std::int64_t>::clear();
-  patch.claimAskedAt = Change<std::int64_t>::clear();
+  patch.key = Change<std::string>::set(a.key);
+  patch.activationId = Change<std::string>::set(a.activationId);
+  patch.lease = Change<std::string>::set(a.lease);
+  patch.checkedMajor = Change<std::int64_t>::set(a.major);
+  patch.keptMajor = Change<std::int64_t>::of(keptWith(std::nullopt, a.claims, a.now, a.major));
+  patch += leasedPatch();
+  // What this activation keyed the install by; none for a fingerprint of no kind.
+  patch.deviceKind = Change<DeviceKind>::of(a.kind);
   return patch;
 }
 

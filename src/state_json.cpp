@@ -11,12 +11,19 @@ namespace detail {
 
 namespace {
 
-constexpr std::array<const char*, 22> kKnownFields = {
-    "key",           "activationId",    "lease",        "trialStart",     "trialEndsAt",  "trialLease",
-    "trialAt",       "lastSeen",        "checkedMajor", "keptMajor",      "backoffSince", "backoffMs",
-    "refused",       "refusedMajor",    "refusedFor",   "deviceKind",     "verdictAt",    "rev",
-    "purchaseToken", "purchaseTokenAt", "claimAskedAt", "trialReportedAt",
+constexpr std::array<const char*, 19> kKnownFields = {
+    "key",          "activationId", "lease",        "trialStart",   "trialEndsAt",     "trialLease", "trialAt",
+    "lastSeen",     "checkedMajor", "keptMajor",    "backoffSince", "backoffMs",       "refused",    "refusedMajor",
+    "refusedFor",   "deviceKind",   "verdictAt",    "rev",          "trialReportedAt",
 };
+
+/**
+ * What an earlier version stored to buy from the app with no key typed (its
+ * purchase secret and the two stamps beside it). Retired: not read, not even
+ * into otherFields, and not written from an app's own otherFields either, so
+ * the next save clears them.
+ */
+constexpr std::array<const char*, 3> kRetiredFields = {"purchaseToken", "purchaseTokenAt", "claimAskedAt"};
 
 /**
  * How deep a value this SDK cannot read may nest and still be kept to be
@@ -25,6 +32,13 @@ constexpr std::array<const char*, 22> kKnownFields = {
  * not kept to overflow the stack on the next save.
  */
 constexpr std::size_t kMaxKeptDepth = 64;
+
+bool isRetired(const std::string& name) {
+  for (const char* field : kRetiredFields) {
+    if (name == field) return true;
+  }
+  return false;
+}
 
 bool isKnown(const std::string& name) {
   for (const char* field : kKnownFields) {
@@ -73,9 +87,6 @@ bool holds(const StoredState& s, const std::string& name) {
   if (name == "deviceKind") return s.deviceKind.has_value();
   if (name == "verdictAt") return s.verdictAt.has_value();
   if (name == "rev") return s.rev.has_value();
-  if (name == "purchaseToken") return s.purchaseToken.has_value();
-  if (name == "purchaseTokenAt") return s.purchaseTokenAt.has_value();
-  if (name == "claimAskedAt") return s.claimAskedAt.has_value();
   if (name == "trialReportedAt") return s.trialReportedAt.has_value();
   return false;
 }
@@ -102,14 +113,12 @@ ordered_json stateToJson(const StoredState& s) {
   if (s.deviceKind) out["deviceKind"] = to_string(*s.deviceKind);
   put(out, "verdictAt", s.verdictAt);
   put(out, "rev", s.rev);
-  put(out, "purchaseToken", s.purchaseToken);
-  put(out, "purchaseTokenAt", s.purchaseTokenAt);
-  put(out, "claimAskedAt", s.claimAskedAt);
   put(out, "trialReportedAt", s.trialReportedAt);
   // Kept as written: fields this SDK does not know, and values of known ones
   // it could not read (a newer SDK's), unless it now holds a value of its own.
+  // A retired name is never written.
   for (const auto& [name, raw] : s.otherFields) {
-    if (isKnown(name) && holds(s, name)) continue;
+    if (isRetired(name) || (isKnown(name) && holds(s, name))) continue;
     ordered_json value = ordered_json::parse(raw, nullptr, false);
     // Nested past what is kept (an app's own otherFields, say): not written, rather than overflow the stack.
     if (!value.is_discarded() && !nestsDeeperThan(value, kMaxKeptDepth)) out[name] = std::move(value);
@@ -144,14 +153,12 @@ StoredState stateFromJson(const json& object) {
   if (const auto kind = stringField(object, "deviceKind")) s.deviceKind = deviceKindFromString(*kind);
   s.verdictAt = numberField(object, "verdictAt");
   s.rev = numberField(object, "rev");
-  s.purchaseToken = stringField(object, "purchaseToken");
-  s.purchaseTokenAt = numberField(object, "purchaseTokenAt");
-  s.claimAskedAt = numberField(object, "claimAskedAt");
   s.trialReportedAt = numberField(object, "trialReportedAt");
   // A field it does not know, or a known one whose value it cannot read (a
   // newer SDK's refusal or device kind, say), is kept to be written back.
   for (const auto& [name, value] : object.items()) {
     if (isKnown(name) && holds(s, name)) continue;
+    if (isRetired(name)) continue;
     if (nestsDeeperThan(value, kMaxKeptDepth)) continue;
     s.otherFields[name] = dumpJson(value);
   }

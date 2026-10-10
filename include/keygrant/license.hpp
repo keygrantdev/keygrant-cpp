@@ -77,9 +77,8 @@ struct Timings {
 /**
  * Client-side licensing for desktop apps. Verifies signed JWT leases OFFLINE
  * and only contacts the server to activate, to renew a lease nearing its end or
- * past it, to tell it of a newer major, to pick up a key bought through
- * purchaseUrl(), or to report a running trial's launch (at most once a day), so
- * a transient outage never locks out a paying customer while the lease is live.
+ * past it, to tell it of a newer major, or to report a running trial's launch
+ * (at most once a day), so a transient outage never locks out a paying customer while the lease is live.
  * A trial's start only moves earlier, and a monotonic clock guard stops a
  * rewound clock resurrecting an expired lease.
  *
@@ -116,14 +115,9 @@ class License {
   /**
    * The licence's status. Offline-first; asks the server only when forced or
    * needed. Never throws: a state that cannot be read just now is `Unknown`
-   * (reason `Storage`), and a save that fails leaves the answer standing.
-   *
-   * With no key held and a purchase secret held (purchaseUrl), the key bought
-   * with it is asked for, under this machine's own fingerprint only: for a
-   * day after the link, once 5 minutes have passed since the last ask
-   * (bounded by 5 s), and at once when forced, until the secret's 30 days are
-   * over. A running trial reports its launch to the server at most once a
-   * day, on a thread of its own and never awaited.
+   * (reason `Storage`), and a save that fails leaves the answer standing. A
+   * running trial reports its launch to the server at most once a day, on a
+   * thread of its own and never awaited.
    */
   LicenseStatus status(bool forceOnline = false);
 
@@ -163,10 +157,7 @@ class License {
   /**
    * Begin (or re-sync) a trial for this device. Never throws: as status() for
    * storage, and the server's trial is kept for this process when it cannot
-   * be saved, until a later call can. The device is read once for both its
-   * asks. With no key held and a purchase secret held (purchaseUrl), the key
-   * bought with it is asked for first, always, bounded by 5 s: bought, it is
-   * the answer (`Licensed`) and no trial is asked.
+   * be saved, until a later call can.
    */
   LicenseStatus startTrial();
 
@@ -178,30 +169,6 @@ class License {
    * storage adapter's exception when the state cannot be read.
    */
   std::optional<std::string> upgradeUrl(const std::string& paymentLink);
-
-  /**
-   * `paymentLink` with a PURCHASE REFERENCE as its `client_reference_id`, or
-   * std::nullopt while the device holds a key (any key: use upgradeUrl(), or
-   * the plain link). Send a customer with no key there to buy: the checkout
-   * keeps the reference on the key it mints, and once they are back the SDK
-   * asks for that key (at once on refresh() or startTrial(), and from
-   * status() for a day after the link), activates this device on it and
-   * answers `Licensed`, with nothing typed.
-   *
-   * The reference is a hash of a one-time secret (256 random bits, never the
-   * fingerprint) that stays on the device and is sent only in that ask, so a
-   * link that leaks claims nothing. The secret is made the first time, kept,
-   * and its link handed out again by every later call; it is dropped 30 days
-   * after the last one, or once a key bought with it is picked up. Runs one at
-   * a time with the other calls; behind a call that has not finished, a held
-   * secret's link is handed out as it is, and none held throws StalledError.
-   * Throws std::invalid_argument for a link that is not an absolute URL
-   * (before anything is read), the storage adapter's exception when the
-   * state cannot be read or the secret cannot be saved (a link whose secret
-   * is not kept could never be picked up), and std::runtime_error when the
-   * CSPRNG cannot give a new secret.
-   */
-  std::optional<std::string> purchaseUrl(const std::string& paymentLink);
 
  private:
   friend class detail::LicenseAccess;

@@ -22,27 +22,6 @@ inline constexpr std::int64_t kRetryUnansweredMs = 60'000;
 /// A valid lease is renewed early once less than this (or half its life) is left.
 inline constexpr std::int64_t kRenewWithinMs = 7LL * 24 * 60 * 60'000;
 inline constexpr std::int64_t kDayMs = 86'400'000;
-/**
- * How long after a claim ask that brought no key back (`claimAskedAt`) before
- * status() asks again on its own (claimDue): a customer back from the checkout
- * finds the app licensed within minutes, and a device holding a purchase
- * secret does not ask on every status(). refresh() and startTrial() ask at once.
- */
-inline constexpr std::int64_t kClaimWaitMs = 5 * 60'000;
-/**
- * How long after purchaseUrl last handed a link out (`purchaseTokenAt`) an
- * unforced status() still asks the claim (claimDue): a customer who buys does
- * so soon after opening the link. After it, only refresh() and startTrial()
- * ask, until kPurchaseTokenMs, so an abandoned checkout does not put the
- * network in front of every launch.
- */
-inline constexpr std::int64_t kClaimEagerMs = kDayMs;
-/**
- * How long a purchase secret is held after purchaseUrl last handed out its
- * link (purchaseTokenKept, by the guarded clock): a secret past it is dropped,
- * never sent. A drop is the device's alone: it revokes nothing on the server.
- */
-inline constexpr std::int64_t kPurchaseTokenMs = 30 * kDayMs;
 /** How often, at most, a running trial reports its launch (trialReportDue), a trial answer counting as one. */
 inline constexpr std::int64_t kTrialReportMs = kDayMs;
 
@@ -92,9 +71,6 @@ struct StatePatch {
   Change<DeviceKind> deviceKind;
   Change<std::int64_t> verdictAt;
   Change<std::int64_t> rev;
-  Change<std::string> purchaseToken;
-  Change<std::int64_t> purchaseTokenAt;
-  Change<std::int64_t> claimAskedAt;
   Change<std::int64_t> trialReportedAt;
 
   /// `{...this, ...other}`: every field `other` names overrides.
@@ -236,31 +212,12 @@ struct About {
   std::optional<std::string> activationId;
 };
 
-/** A save about a purchase secret: its drop (`token` alone), or the wait after a claim ask (`token` and `at`). */
-struct AboutToken {
-  /// The secret.
-  std::string token;
-  /// For a wait: the `purchaseTokenAt` its asker read.
-  std::optional<std::int64_t> at;
-};
-
 /** What a save is based on. */
 struct Basis {
   std::optional<Asked> answer;
   std::optional<Asked> activation;
   std::optional<About> about;
   std::optional<Stamp> trial;
-  /**
-   * About a purchase secret: its purchase fields (purchaseToken,
-   * purchaseTokenAt, claimAskedAt) land only while that secret is the one
-   * stored, so one another process made meanwhile is neither dropped nor
-   * stamped by it. A wait carries the `purchaseTokenAt` its asker read (`at`),
-   * and lands only while that is stored too: a link handed out again since
-   * cleared the wait so that the next status() asks at once, and a late answer
-   * must not start it again. A drop carries none: a spent secret is dead
-   * however recently its link was handed out.
-   */
-  std::optional<AboutToken> purchase;
 };
 
 enum class OutOfDate { No, Activation, Answer };
@@ -286,13 +243,28 @@ StatePatch leasedPatch();
 /** What a deactivated device keeps of its licence: nothing but its trial evidence and clock guard. */
 StatePatch unkeyedPatch();
 
+/** An activation the server answered with a lease that licenses this build (activationPatch). */
+struct Activation {
+  std::string key;
+  std::string activationId;
+  std::string lease;
+  /// The lease's claims.
+  LeaseClaims claims;
+  /// The time the lease was judged at.
+  std::int64_t now = 0;
+  /// This build's major.
+  std::int64_t major = 1;
+  /// What the activation's fingerprint hashes: none for one of no kind.
+  std::optional<DeviceKind> kind;
+};
+
 /**
- * What an activation (a typed key, or a bought key picked up) and a
- * deactivation clear: the purchase secret and its stamps. A secret left on a
- * keyed install would, after a later deactivation, activate the device on a
- * key the customer may have meant for another machine.
+ * What an activation saves (activate()), stamped as an activation: the key,
+ * the activation, the lease, the major heard, the kept major (keptWith), any
+ * refusal and wait cleared (leasedPatch), and what the install is keyed by
+ * (cleared for a fingerprint of no kind).
  */
-StatePatch noPurchasePatch();
+StatePatch activationPatch(const Activation& activation);
 
 /** The stored refusal that still stands for a build running `major`, or none. */
 struct DeviceView {

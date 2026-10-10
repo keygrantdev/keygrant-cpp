@@ -539,5 +539,40 @@ TEST(NeverThrows, StatusRefreshAndStartTrialAnswerUnknownWhenTheClockThrows) {
   EXPECT_EQ(h.license().status(), licensed(KEY));
 }
 
+TEST(TrialModelKey, IsLicensedOfflineAndNeverReportsATrial) {
+  // A key issued under a trial model is a licence lease: judged as any other, never as the device's trial.
+  Harness h;
+  h.store(held(h.sign("KEY-1", "trial", 30 * 24 * 3600), "KEY-1"));
+  h.http->fail = true;
+  EXPECT_EQ(h.license().status(), licensed("KEY-1"));
+  ASSERT_TRUE(h.reportSettled());
+  EXPECT_TRUE(h.http->actions().empty());
+  EXPECT_FALSE(h.stored()->trialLease);
+}
+
+TEST(Answers, AreReadIgnoringEveryMemberAParserDoesNotKnow) {
+  const json extra = {{"future", {{"nested", {1, 2}}}}, {"note", "added by a later server"}};
+  const auto with = [&extra](json body) {
+    body.update(extra);
+    return body;
+  };
+  Harness h;
+  const std::string lease = h.sign("KEY-1", "perpetual", 30 * 24 * 3600);
+  h.http->reply("activate", 200, with({{"lease", lease}, {"activationId", "act_1"}}));
+  h.http->reply("validate", 200, with({{"lease", lease}}));
+  EXPECT_EQ(h.license().activate("KEY-1"), ok());
+  EXPECT_EQ(h.license().status(), licensed("KEY-1"));
+  EXPECT_EQ(h.license().refresh(), licensed("KEY-1"));
+  EXPECT_EQ(h.http->actions(), (std::vector<std::string>{"activate", "validate"}));
+
+  Harness trial;
+  const std::string trialLease = trial.sign("trial:fp-test", "trial", 5 * 24 * 3600);
+  trial.http->reply("trial", 200, with({{"trialStart", NOW}, {"trialEndsAt", NOW + 5 * DAY}, {"lease", trialLease}}));
+  LicenseStatus running = status(LicenseState::Trial);
+  running.trialEndsAt = NOW + 5 * DAY;
+  running.trialDaysLeft = 5;
+  EXPECT_EQ(trial.license().startTrial(), running);
+}
+
 }  // namespace
 }  // namespace kgtest

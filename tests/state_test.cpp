@@ -63,6 +63,28 @@ TEST(StateJson, KeepsFieldsItDoesNotKnowAndWritesThemBack) {
   EXPECT_EQ(json::parse(serializeState(*state)), json::parse(R"({"key":"K","futureField":{"a":[1,2]},"note":"x"})"));
 }
 
+TEST(StateJson, NeverReadsNorWritesBackAPurchaseSecretAnEarlierVersionStored) {
+  const auto state = parseState(
+      R"({"trialStart":1756740800000,"purchaseToken":"q1w2e3r4t5y6u7i8o9p0a1s2d3f4g5h6j7k8l9z0x1c",)"
+      R"("purchaseTokenAt":1756913600000,"claimAskedAt":1756999940000,"later":{"n":1}})");
+  ASSERT_TRUE(state);
+  StoredState expected;
+  expected.trialStart = 1756740800000;
+  expected.otherFields["later"] = R"({"n":1})";
+  EXPECT_EQ(*state, expected);
+  EXPECT_EQ(json::parse(serializeState(*state)), json::parse(R"({"trialStart":1756740800000,"later":{"n":1}})"));
+}
+
+TEST(StateJson, NeverWritesAPurchaseSecretSetAmongTheOtherFieldsByHand) {
+  StoredState s;
+  s.trialStart = 1756740800000;
+  s.otherFields["purchaseToken"] = R"("q1w2e3r4t5y6u7i8o9p0a1s2d3f4g5h6j7k8l9z0x1c")";
+  s.otherFields["purchaseTokenAt"] = "1756913600000";
+  s.otherFields["claimAskedAt"] = "1756999940000";
+  s.otherFields["later"] = R"({"n":1})";
+  EXPECT_EQ(json::parse(serializeState(s)), json::parse(R"({"trialStart":1756740800000,"later":{"n":1}})"));
+}
+
 TEST(StateJson, ReadsAKnownFieldOfTheWrongTypeAsAbsent) {
   const auto state = parseState(R"({"key":7,"lastSeen":"soon","refused":"weird","deviceKind":"vm","refusedFor":["a",3,null,"b"]})");
   ASSERT_TRUE(state);

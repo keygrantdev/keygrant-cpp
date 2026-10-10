@@ -70,9 +70,7 @@ Engine::Engine(LicenseConfig config, const Timings& timings)
  * starts from what the last one left, and the second of two overlapping checks
  * finds it already answered. A call waits for the one before it to settle, but
  * not past the HTTP bound plus the lock grace from when that one STARTED
- * running, `extra` more for a call that may make a second, shorter request
- * (startTrial(): a claim bounded as a status check is, then its trial ask, so
- * its longest legitimate run fits). The storage, fingerprint and registry
+ * running. The storage, fingerprint and registry
  * adapters are not bounded (cutting a storage write short could leave it
  * half-written), so a call stuck
  * on one is left to finish, and the calls behind it go ahead READ-ONLY for as
@@ -80,7 +78,7 @@ Engine::Engine(LicenseConfig config, const Timings& timings)
  * with no ask and no write, since a write of theirs could be reverted by the
  * stuck call's late one.
  */
-void Engine::serial(const std::function<void(bool readOnly)>& work, Milliseconds extra) {
+void Engine::serial(const std::function<void(bool readOnly)>& work) {
   auto own = std::make_shared<Slot>();
   bool readOnly = false;
   {
@@ -94,8 +92,7 @@ void Engine::serial(const std::function<void(bool readOnly)>& work, Milliseconds
     readOnly = writing_ > 0;
     if (!readOnly) ++writing_;
     own->started = true;
-    own->graceOver = std::chrono::steady_clock::now() + httpTimeout_ + std::min(timings_.lockGrace, kLongestBound) +
-                     std::clamp(extra, Milliseconds{0}, kLongestBound);
+    own->graceOver = std::chrono::steady_clock::now() + httpTimeout_ + std::min(timings_.lockGrace, kLongestBound);
   }
   serialChanged_.notify_all();
   struct Settle {
@@ -144,7 +141,7 @@ VerifyResult Engine::verify(const std::string& lease, std::int64_t now) const { 
 
 /**
  * The ids of the keys this build carries (`kid`, each key's thumbprint), in
- * the order configured: sent with each activation, validate and claim, so the
+ * the order configured: sent with each activation and validate, so the
  * product's dashboard can count the devices whose builds do not carry a key yet.
  */
 ordered_json Engine::kidsJson() const { return keys_.kids(); }

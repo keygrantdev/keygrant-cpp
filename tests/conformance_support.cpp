@@ -75,9 +75,6 @@ json patchJson(const StatePatch& p) {
   put("deviceKind", p.deviceKind, named);
   put("verdictAt", p.verdictAt, same);
   put("rev", p.rev, same);
-  put("purchaseToken", p.purchaseToken, same);
-  put("purchaseTokenAt", p.purchaseTokenAt, same);
-  put("claimAskedAt", p.claimAskedAt, same);
   put("trialReportedAt", p.trialReportedAt, same);
   return out;
 }
@@ -85,10 +82,9 @@ json patchJson(const StatePatch& p) {
 /** A patch from JSON: null clears the field; an absent field is left alone. */
 StatePatch patchFrom(const json& j) {
   static const std::set<std::string> known = {
-      "key",          "activationId", "lease",        "trialStart", "trialEndsAt", "trialLease",
-      "trialAt",      "lastSeen",     "checkedMajor", "keptMajor",  "backoffSince", "backoffMs",
-      "refused",      "refusedMajor", "refusedFor",   "deviceKind", "verdictAt",   "rev",
-      "purchaseToken", "purchaseTokenAt", "claimAskedAt", "trialReportedAt"};
+      "key",          "activationId", "lease",        "trialStart", "trialEndsAt", "trialLease",    "trialAt",
+      "lastSeen",     "checkedMajor", "keptMajor",    "backoffSince", "backoffMs",  "refused",       "refusedMajor",
+      "refusedFor",   "deviceKind",   "verdictAt",    "rev",          "trialReportedAt"};
   for (const auto& [name, value] : j.items()) {
     (void)value;
     EXPECT_TRUE(known.count(name)) << "a patch field this harness does not know: " << name;
@@ -114,9 +110,6 @@ StatePatch patchFrom(const json& j) {
   take(j, "deviceKind", p.deviceKind, [](const json& v) { return *keygrant::deviceKindFromString(v.get<std::string>()); });
   take(j, "verdictAt", p.verdictAt, num);
   take(j, "rev", p.rev, num);
-  take(j, "purchaseToken", p.purchaseToken, str);
-  take(j, "purchaseTokenAt", p.purchaseTokenAt, num);
-  take(j, "claimAskedAt", p.claimAskedAt, num);
   take(j, "trialReportedAt", p.trialReportedAt, num);
   return p;
 }
@@ -138,13 +131,9 @@ Basis basisFrom(const json& j) {
     const json& t = j["trial"];
     basis.trial = Stamp{t["at"].get<std::int64_t>(), t.contains("seen") ? optInt(t["seen"]) : std::nullopt};
   }
-  if (j.contains("purchase")) {
-    const json& p = j["purchase"];
-    basis.purchase = AboutToken{p["token"].get<std::string>(), p.contains("at") ? optInt(p["at"]) : std::nullopt};
-  }
   for (const auto& [name, value] : j.items()) {
     (void)value;
-    EXPECT_TRUE(name == "answer" || name == "activation" || name == "about" || name == "trial" || name == "purchase")
+    EXPECT_TRUE(name == "answer" || name == "activation" || name == "about" || name == "trial")
         << "a basis this harness does not know: " << name;
   }
   return basis;

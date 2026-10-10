@@ -1,4 +1,4 @@
-// What the conformance replays (conformance_test.cpp, conformance_purchase_test.cpp) share: a
+// What the conformance replays (conformance_test.cpp, conformance_later_test.cpp) share: a
 // vector's JSON inputs read as the SDK's own types, and an answer written as the file writes it.
 #pragma once
 

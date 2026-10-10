@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+
+- `License::purchaseUrl` is removed, and the SDK no longer asks for a bought key at `status()`, `refresh()` or
+  `startTrial()`. To sell from the app, open your Payment Link from your own Buy button; the customer types the key
+  from the delivery email (`activate`). A purchase secret an earlier version stored is ignored, and left out the next
+  time the SDK saves its state.
+- `StoredState` no longer has `purchaseToken`, `purchaseTokenAt` or `claimAskedAt`: a storage adapter or test code
+  that sets them stops compiling, and the same names among its `otherFields` are never written. The shared library's
+  SONAME carries the minor version while it is 0.x (`libkeygrant.so.0.4`), as `StoredState`'s layout changed.
+
 ## 0.3.0
 
 - Key sets: `LicenseConfig::publicJwk` takes the product's key set (`{"keys":[...]}`, as `/pubkey` answers

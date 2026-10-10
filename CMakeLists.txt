@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(keygrant
-  VERSION 0.3.0
+  VERSION 0.4.0
   DESCRIPTION "KeyGrant licensing SDK for native desktop apps"
   LANGUAGES CXX)
 
@@ -46,8 +46,6 @@ add_library(keygrant
   src/machine_id.cpp
   src/machine_id_system.cpp
   src/offline.cpp
-  src/pickup.cpp
-  src/purchases.cpp
   src/renewal.cpp
   src/state_json.cpp
   src/storage_file.cpp
@@ -63,6 +61,14 @@ add_library(keygrant::keygrant ALIAS keygrant)
 
 include(GNUInstallDirs)
 
+# A 0.x minor may change the library's ABI, so while the major is 0 the shared library's SONAME
+# carries the minor too (libkeygrant.so.0.4); from 1.0 on, the major alone.
+if(PROJECT_VERSION_MAJOR EQUAL 0)
+  set(KEYGRANT_SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
+else()
+  set(KEYGRANT_SOVERSION ${PROJECT_VERSION_MAJOR})
+endif()
+
 target_compile_features(keygrant PUBLIC cxx_std_17)
 set_target_properties(keygrant PROPERTIES
   CXX_STANDARD 17
@@ -70,7 +76,7 @@ set_target_properties(keygrant PROPERTIES
   CXX_EXTENSIONS OFF
   WINDOWS_EXPORT_ALL_SYMBOLS ON
   VERSION ${PROJECT_VERSION}
-  SOVERSION ${PROJECT_VERSION_MAJOR})
+  SOVERSION ${KEYGRANT_SOVERSION})
 target_include_directories(keygrant
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -115,7 +121,7 @@ if(KEYGRANT_BUILD_TESTS)
   find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto SSL)
   add_executable(keygrant_tests
     tests/conformance_keys_test.cpp
-    tests/conformance_purchase_test.cpp
+    tests/conformance_later_test.cpp
     tests/conformance_support.cpp
     tests/conformance_test.cpp
     tests/crypto_test.cpp
@@ -125,14 +131,13 @@ if(KEYGRANT_BUILD_TESTS)
     tests/license_device_test.cpp
     tests/license_entitlements_test.cpp
     tests/license_keyset_test.cpp
-    tests/license_pickup_test.cpp
-    tests/license_purchase_test.cpp
     tests/license_renewal_test.cpp
     tests/license_status_test.cpp
     tests/license_timing_test.cpp
     tests/license_trial_test.cpp
     tests/machine_id_test.cpp
     tests/offline_test.cpp
+    tests/retired_test.cpp
     tests/stash_test.cpp
     tests/state_test.cpp
     tests/storage_engine_test.cpp

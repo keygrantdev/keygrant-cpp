@@ -11,9 +11,9 @@
 
 namespace keygrant::detail {
 
-/** startTrial()'s trial ask, under the device startTrial() read for both its asks (`known`). */
-LicenseStatus Engine::startTrialNow(const StoredState& state, const Device& known) {
-  const TrialAsk ask = askTrial(state, timings_.activateMachineId, std::nullopt, &known);
+/** startTrial()'s trial ask, the device read given an activation's time. */
+LicenseStatus Engine::startTrialNow(const StoredState& state) {
+  const TrialAsk ask = askTrial(state, timings_.activateMachineId);
   // The server's trial even when it could not be saved: kept for this process
   // (unsaved_) until a later call saves it.
   return trialStatus(ask.latest, effectiveNow(state));
@@ -22,12 +22,12 @@ LicenseStatus Engine::startTrialNow(const StoredState& state, const Device& know
 /**
  * Ask the server for this device's trial (`trial`, with the earliest start the
  * device holds as `clientStart`) and save its answer: `reached` when the
- * server answered at all, `latest` the state with its trial merged in. Under
- * the device already read (`known`), else read now for `machineIdTimeout`.
+ * server answered at all, `latest` the state with its trial merged in. The
+ * device is read for `machineIdTimeout`.
  */
 Engine::TrialAsk Engine::askTrial(const StoredState& state, Milliseconds machineIdTimeout,
-                                  std::optional<Milliseconds> timeout, const Device* known) {
-  const Device here = known ? *known : device(machineIdTimeout, state.deviceKind);
+                                  std::optional<Milliseconds> timeout) {
+  const Device here = device(machineIdTimeout, state.deviceKind);
   // The stash is the app's own adapter (the Windows registry, say), and it can
   // cost nothing: one that cannot be read is no evidence, and startTrial() still answers.
   std::optional<std::int64_t> stashed;

@@ -108,12 +108,6 @@ TEST(ReferencedLink, RefusesALinkThatIsNotAnAbsoluteUrl) {
   }
 }
 
-TEST(ClaimBodies, AreNothingWhenTheTextIsNotJson) {
-  // The parseClaimBody vectors hold every JSON body; text that is not JSON (a portal's page) is the one they cannot.
-  const ClaimBody page = parseClaimBody(parseJsonText("<html>"));
-  EXPECT_FALSE(page.key || page.activationId || page.lease || page.pending || page.error);
-}
-
 TEST(Utf8, DecodesAsTheWhatwgDecoderDoes) {
   // Every ill-formed sequence is one U+FFFD, the bytes after it read again.
   EXPECT_EQ(sanitizeUtf8("a\xffz"), "a\xEF\xBF\xBDz");

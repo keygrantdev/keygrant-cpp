@@ -1,5 +1,5 @@
 // The one piece of URL handling the SDK needs: a payment link with a reference
-// as its client_reference_id, which upgradeUrl() and purchaseUrl() both build.
+// as its client_reference_id, which upgradeUrl() builds.
 #pragma once
 
 #include <optional>

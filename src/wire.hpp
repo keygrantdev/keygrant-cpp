@@ -92,25 +92,6 @@ struct TrialBody {
 };
 std::optional<TrialBody> parseTrialBody(const json& body);
 
-/** A claim's answer (parseClaimBody): what of each member it can use. */
-struct ClaimBody {
-  std::optional<std::string> key;
-  std::optional<std::string> activationId;
-  std::optional<std::string> lease;
-  /// "Not bought yet": only a `pending` that is `true`.
-  bool pending = false;
-  /// The answer's error word: only a string of at least one character.
-  std::optional<std::string> error;
-};
-
-/**
- * A claim's answer, keeping each member only when it is what it should be:
- * the key, the activation id and the lease when they are strings, `pending`
- * when it is `true`, the error when it is a word. Members it does not know are
- * ignored, and a body that is not an object is nothing.
- */
-ClaimBody parseClaimBody(const json& body);
-
 /** The smallest of the times given, or none. */
 std::optional<std::int64_t> earliest(std::initializer_list<std::optional<std::int64_t>> values);
 

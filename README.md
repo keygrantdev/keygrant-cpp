@@ -2,8 +2,8 @@
 
 Licensing for native desktop apps (Qt, wxWidgets, JUCE, plain Win32, Cocoa or GTK): a licence is proven to the app by a
 signed lease (a JWT, EdDSA over Ed25519) that the SDK verifies **offline** against your product's public key. The app
-only talks to KeyGrant to activate, to renew a lease near or past its end, to report a newer major version, to pick up a
-key bought through `purchaseUrl()`, or to report a running trial's launch (at most once a day).
+only talks to KeyGrant to activate, to renew a lease near or past its end, to report a newer major version, or to
+report a running trial's launch (at most once a day).
 
 The rule every line of it serves: **licensing failure fails in favour of the
 paying customer.** An outage, no network, a timeout, a 5xx, a 429, an ambiguous
@@ -29,7 +29,7 @@ major can hold). The full guide is at https://keygrant.dev/docs.
 include(FetchContent)
 FetchContent_Declare(keygrant
   GIT_REPOSITORY https://github.com/keygrantdev/keygrant-cpp.git
-  GIT_TAG        0.3.0)
+  GIT_TAG        0.4.0)
 FetchContent_MakeAvailable(keygrant)
 
 target_link_libraries(my_app PRIVATE keygrant::keygrant)
@@ -39,7 +39,7 @@ or, with the repository vendored, `add_subdirectory(third_party/keygrant)`. Buil
 SDK builds no tests and never adds `-Werror` to your build.
 
 OpenSSL 3, libcurl and nlohmann/json must be findable by `find_package`. Installed (`cmake --install`), the SDK
-is a package: `find_package(keygrant 0.3 REQUIRED)` (a static install finds OpenSSL and CURL again for you).
+is a package: `find_package(keygrant 0.4 REQUIRED)` (a static install finds OpenSSL and CURL again for you).
 
 ### vcpkg (Windows, macOS)
 
@@ -143,66 +143,31 @@ come from any number of threads (below).
   one, or a device refusal that stands for this one) is dropped here without asking KeyGrant to release it, which
   would lock that PC out; `released` is then `true`, as this device held no seat. Throws `keygrant::StalledError`
   behind a stuck call (nothing released or dropped), and the storage's exception.
-- `startTrial()`: never throws. The device is read once for everything it asks. With no key held and a purchase secret
-  held (`purchaseUrl`, below), the key bought with it is asked for first, always, bounded by 5 s: bought, it is the
-  answer (`Licensed`) and no trial is asked. A trial runs only while its
-  trial lease (signed by KeyGrant to the trial's own end)
+- `startTrial()`: never throws. A trial runs only while its trial lease (signed by KeyGrant to the trial's own end)
   is valid: the end stored beside it is unsigned, and editing it extends nothing. An answer whose trial lease this
   build cannot verify (signed with a key the product rotated to ahead of this build, say) never replaces a stored one
   it can, which would end a running trial; an answer with no lease (the trial is over) is taken as it is. A trial the
   disk refused is kept for this process and saved by the next call that can.
 - `upgradeUrl(paymentLink)`: your Stripe payment link with `client_reference_id` set to this device's
   **activation id** (never the key), or `std::nullopt` with no activation. An upgrade sale finds the key through it.
-- `purchaseUrl(paymentLink)`: your Stripe payment link with `client_reference_id` set to the reference to this
-  install's one-time purchase secret, or `std::nullopt` while any key is held (below).
+  The link's own parameters are kept as written and in their order, any `client_reference_id` already on it is
+  replaced, and the fragment is kept. Throws `std::invalid_argument` for a link that is not an absolute URL.
 
-Both links are built one way: the link's own parameters are kept as written and in their order, any
-`client_reference_id` already on it is replaced, and the fragment is kept. Both throw `std::invalid_argument` for a
-link that is not an absolute URL.
+### Buying from the app
 
-### Buying from the app: no key to type
-
-Give a customer who holds no key a Buy button that opens your Stripe Payment Link through `purchaseUrl`. When they
-come back to the app, the key they bought is picked up and this device activated on it, with nothing typed:
+Give a customer who holds no key a Buy button that opens your Stripe Payment Link. The checkout emails them their
+key, and they type it into the app:
 
 ```cpp
-bool checkoutOpened = false;
-if (const std::optional<std::string> url = license.purchaseUrl("https://buy.stripe.com/your-link")) {
-  openInBrowser(*url);   // QDesktopServices::openUrl, ShellExecuteW, NSWorkspace openURL, ...
-  checkoutOpened = true; // url is std::nullopt while a key is held: use upgradeUrl() for an upgrade
-}
+// "Buy" on the trial or activation screen: QDesktopServices::openUrl, ShellExecuteW, NSWorkspace openURL, ...
+openInBrowser("https://buy.stripe.com/your-link");
 
-// When the customer is back (the window regains focus, say), off the UI thread, and only while a
-// checkout is open: refresh() on a licensed install validates online every time.
-if (checkoutOpened && license.status().state != keygrant::LicenseState::Licensed) {
-  const keygrant::LicenseStatus status = license.refresh();   // Licensed once the checkout has gone through
-  if (status.state == keygrant::LicenseState::Licensed) checkoutOpened = false;
-}
+// Once they have the key from the email:
+const keygrant::ActivateResult result = license.activate(enteredKey);
 ```
 
-- **How:** `purchaseUrl` keeps a one-time secret for this install (256 random bits from OpenSSL's CSPRNG, never the
-  device's fingerprint) and sets the link's `client_reference_id` to a hash of it, so a link that leaks (browser
-  history, a screenshot) claims nothing. The checkout keeps that reference on the key it mints, and the SDK asks
-  for the key with the secret: at once on `refresh()` or `startTrial()`, and from `status()` at most every five
-  minutes for a day after the link, bounded by 5 s (after that, `refresh()` or `startTrial()` still ask). `status()`
-  and `refresh()` ask only under this machine's own fingerprint; `startTrial()` falls back to the host name as an
-  activation does. Until the key is bought, the status is what it was (the trial, or `Unlicensed`).
-- **Turn the product's "Converts in place" switch on** once your app uses `purchaseUrl`: it is off by default, and
-  until it is on every pickup is refused and the customer types the key from the delivery email. Know the trade
-  before you do: whoever opens a checkout owns its pickup. Your Payment Link is public, so anyone can add a
-  `client_reference_id` of their own to it and get buyers to pay through their copy of the link; the key bought that
-  way is picked up by the link's maker, not the buyer. A link from the app is the buyer's own; a leaked one claims
-  nothing, as it carries only a hash of the app's secret. A planted pickup shows in the key's history, and you can
-  free the seat for the buyer.
-- **Calling it again** hands out the same secret's link, so the key bought through either link is picked up (paying
-  twice buys two keys; the second comes by email). A secret is dropped 30 days after the last link, once its key is
-  picked up, or when the server answers that it never will be (the product's "Converts in place" switch is off, or
-  another device took it): the customer then types the key from the delivery email. An activation and a
-  deactivation drop it too. A drop is this device's alone: it revokes nothing on the server.
-- **It throws** `std::invalid_argument` for a link that is not an absolute URL (before anything is read), the
-  storage's exception when the state cannot be read or the secret cannot be saved (a link whose secret is lost could
-  never be picked up), and `std::runtime_error` when the CSPRNG cannot give a new secret. Behind a call that has not finished it hands out a held secret's link as it is, and throws
-  `keygrant::StalledError` when none is held.
+For a customer who already holds a key, `upgradeUrl(paymentLink)` adds this install's activation to the link, so an
+upgrade sale finds the key it upgrades.
 
 ### Trials: what the app calls
 
@@ -244,7 +209,7 @@ SDK computes from the key itself). It is verified by that key; a lease that name
 sets) by each key in turn; and one naming a key the build does not carry is refused (`UnknownKey`). When the product
 rotates its signing key, it first *stages* the next key, published beside the current one while every lease is still
 signed with the current key. Ship builds carrying both; once they are out, the product *switches*, and those builds
-verify every lease signed after it. Embed the whole set each time you build. Each activation, validate and claim
+verify every lease signed after it. Embed the whole set each time you build. Each activation and validate
 reports the ids of the keys the build carries (`kids`), so the dashboard can count the devices still on builds
 without the staged key before you switch.
 
@@ -329,8 +294,7 @@ before, once. `keygrant::serializeState`/`parseState` give the format to a stora
 ## Threading
 
 - Calls on one `License` run **one at a time**, from any number of threads.
-- A call waits for the one before it, but not past that call's HTTP bound plus 15 s from when it started (5 s more
-  after a `startTrial()`, which may ask twice: the purchase claim, then the trial). Past
+- A call waits for the one before it, but not past that call's HTTP bound plus 15 s from when it started. Past
   that (an adapter stuck on a dead disk, say), it runs **read-only**: it answers from what is stored, asks nothing,
   writes nothing, and says `stalled`. `activate()` read-only is `Network`; `deactivate()` throws `StalledError`.
 - Every request, fingerprint and machine-id read is held to its bound by running it on a thread of its own, which
@@ -455,7 +419,7 @@ Where this SDK differs from the Electron SDK, and why:
   exception (a custom clock that throws, say) is answered `Unknown`/`Storage`. The reference would reject.
 - **`WindowsRegistryStash`** is an opt-in default the reference does not ship (Electron apps inject their own); it
   keeps the one stash format every KeyGrant SDK shares.
-- **`upgradeUrl` and `purchaseUrl`** read the link with a small URL routine, not a full WHATWG parser: the scheme and
+- **`upgradeUrl`** reads the link with a small URL routine, not a full WHATWG parser: the scheme and
   an http(s) host are lower-cased, and the query and fragment get the percent-encoding the WHATWG parser gives them;
   a default port, a path and an international host are left as given (the parser would drop the port, normalize the
   path and write the host in Punycode).
