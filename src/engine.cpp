@@ -62,6 +62,7 @@ Engine::Engine(LicenseConfig config, const Timings& timings)
       httpTimeout_(checkedTimeout(config.httpTimeout)),
       timings_(timings),
       keys_(KeySet::fromJwk(config.publicJwk)),
+      revoked_(std::move(config.revokedLicenseFiles)),
       a_(withDefaults(std::move(config.adapters), product_)),
       reader_(std::make_shared<DeviceIdentityReader>(a_.fingerprint)) {}
 

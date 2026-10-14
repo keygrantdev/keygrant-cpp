@@ -146,17 +146,20 @@ json claimsJson(const LeaseClaims& c) {
 }
 
 std::optional<std::string> keyIdOf(std::string_view header) {
-  static constexpr std::string_view kStart = R"({"alg":"EdDSA","typ":"JWT","kid":")";
+  return namedKeyId(header, R"({"alg":"EdDSA","typ":"JWT","kid":")");
+}
+
+std::optional<std::string> namedKeyId(std::string_view header, std::string_view start) {
   static constexpr std::string_view kEnd = R"("})";
   const std::optional<Bytes> bytes = base64UrlDecode(header);
   if (!bytes) return std::nullopt;
   const std::string text(bytes->begin(), bytes->end());
   // Long enough for both ends apart: `..."kid":"}` ends with `"}` only through the start's own quote.
-  if (text.size() < kStart.size() + kEnd.size()) return std::nullopt;
-  if (text.compare(0, kStart.size(), kStart) != 0 || text.compare(text.size() - kEnd.size(), kEnd.size(), kEnd) != 0) {
+  if (text.size() < start.size() + kEnd.size()) return std::nullopt;
+  if (text.compare(0, start.size(), start) != 0 || text.compare(text.size() - kEnd.size(), kEnd.size(), kEnd) != 0) {
     return std::nullopt;
   }
-  const std::string kid = text.substr(kStart.size(), text.size() - kStart.size() - kEnd.size());
+  const std::string kid = text.substr(start.size(), text.size() - start.size() - kEnd.size());
   const auto base64url = [](unsigned char c) {
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
   };

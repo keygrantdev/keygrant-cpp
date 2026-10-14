@@ -72,6 +72,7 @@ struct StatePatch {
   Change<std::int64_t> verdictAt;
   Change<std::int64_t> rev;
   Change<std::int64_t> trialReportedAt;
+  Change<std::string> licenseFile;
 
   /// `{...this, ...other}`: every field `other` names overrides.
   StatePatch& operator+=(const StatePatch& other);

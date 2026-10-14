@@ -14,5 +14,6 @@
 #include "keygrant/adapters.hpp"
 #include "keygrant/fingerprint.hpp"
 #include "keygrant/license.hpp"
+#include "keygrant/license_file.hpp"
 #include "keygrant/storage.hpp"
 #include "keygrant/types.hpp"

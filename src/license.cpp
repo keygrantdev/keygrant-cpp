@@ -180,6 +180,11 @@ bool Engine::seatElsewhere(const StoredState& state) {
 }
 
 LicenseStatus Engine::statusNow(const StoredState& state, bool forceOnline, bool readOnly) {
+  // A stored offline licence file that licenses this build wins, offline, with
+  // no ask and no write; one that does not answers only when no key path and no
+  // running trial does.
+  const std::optional<LicenseStatus> file = fileStatus(state);
+  if (file && file->state == LicenseState::Licensed) return *file;
   const std::int64_t now = effectiveNow(state);
   // A device refusal stands only for the device it was given for: who this is.
   std::optional<DeviceView> view;
@@ -191,8 +196,21 @@ LicenseStatus Engine::statusNow(const StoredState& state, bool forceOnline, bool
   if (refused && readOnly) return invalidStatus(reasonOf(*refused), state.key);
   if (refused) return refusedStatus(state, *refused, forceOnline);
   if (truthy(state.key) && truthy(state.lease)) return licenseStatus(state, *state.lease, now, forceOnline, readOnly);
-  if (state.trialStart) return trialStatus(state, now, StatusAsk{forceOnline, readOnly});
-  return unlicensed();
+  return trialOrFile(state, now, file, StatusAsk{forceOnline, readOnly});
+}
+
+/**
+ * With no key to answer: a trial this device started while it runs, else a
+ * stored file that does not license this build (why is the news), else the
+ * trial that has ended, else unlicensed.
+ */
+LicenseStatus Engine::trialOrFile(const StoredState& state, std::int64_t now, const std::optional<LicenseStatus>& file,
+                                  const StatusAsk& ask) {
+  std::optional<LicenseStatus> trial;
+  if (state.trialStart) trial = trialStatus(state, now, ask);
+  if (trial && trial->state == LicenseState::Trial) return *trial;
+  if (file) return *file;
+  return trial ? *trial : unlicensed();
 }
 
 /**
@@ -289,6 +307,21 @@ DeactivateResult License::deactivate() {
 LicenseStatus License::startTrial() {
   const std::shared_ptr<detail::Engine> engine = engine_;
   return engine->startTrial();
+}
+
+ImportLicenseFileResult License::importLicenseFile(std::string_view content) {
+  const std::shared_ptr<detail::Engine> engine = engine_;
+  return engine->importLicenseFile(content);
+}
+
+ImportLicenseFileResult License::importLicenseFile(const std::vector<std::uint8_t>& content) {
+  const std::shared_ptr<detail::Engine> engine = engine_;
+  return engine->importLicenseFile(std::string_view(reinterpret_cast<const char*>(content.data()), content.size()));
+}
+
+void License::removeLicenseFile() {
+  const std::shared_ptr<detail::Engine> engine = engine_;
+  engine->removeLicenseFile();
 }
 
 std::optional<std::string> License::upgradeUrl(const std::string& paymentLink) {

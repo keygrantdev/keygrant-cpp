@@ -76,6 +76,7 @@ json patchJson(const StatePatch& p) {
   put("verdictAt", p.verdictAt, same);
   put("rev", p.rev, same);
   put("trialReportedAt", p.trialReportedAt, same);
+  put("licenseFile", p.licenseFile, same);
   return out;
 }
 
@@ -84,7 +85,7 @@ StatePatch patchFrom(const json& j) {
   static const std::set<std::string> known = {
       "key",          "activationId", "lease",        "trialStart", "trialEndsAt", "trialLease",    "trialAt",
       "lastSeen",     "checkedMajor", "keptMajor",    "backoffSince", "backoffMs",  "refused",       "refusedMajor",
-      "refusedFor",   "deviceKind",   "verdictAt",    "rev",          "trialReportedAt"};
+      "refusedFor",   "deviceKind",   "verdictAt",    "rev",          "trialReportedAt", "licenseFile"};
   for (const auto& [name, value] : j.items()) {
     (void)value;
     EXPECT_TRUE(known.count(name)) << "a patch field this harness does not know: " << name;
@@ -111,6 +112,7 @@ StatePatch patchFrom(const json& j) {
   take(j, "verdictAt", p.verdictAt, num);
   take(j, "rev", p.rev, num);
   take(j, "trialReportedAt", p.trialReportedAt, num);
+  take(j, "licenseFile", p.licenseFile, str);
   return p;
 }
 
@@ -163,6 +165,13 @@ json statusJson(const LicenseStatus& s) {
   if (s.test) out["test"] = true;
   // Doubles, compared with the file's numbers as numbers (5 and 5.0 alike).
   if (!s.entitlements.empty()) out["entitlements"] = entitlementsJson(s.entitlements);
+  if (s.source) out["source"] = keygrant::to_string(*s.source);
+  if (s.licensedTo) {
+    json to = json::object();
+    if (s.licensedTo->name) to["name"] = *s.licensedTo->name;
+    if (s.licensedTo->email) to["email"] = *s.licensedTo->email;
+    out["licensedTo"] = to;
+  }
   return out;
 }
 

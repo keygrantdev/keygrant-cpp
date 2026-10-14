@@ -90,4 +90,12 @@ VerifyResult verifyLease(std::string_view token, const KeySet& keys, std::int64_
  */
 std::optional<std::string> keyIdOf(std::string_view header);
 
+/**
+ * The key id a header names when it is, byte for byte, canonical base64url of
+ * <start><kid>"}, <kid> 1 to 64 characters of the base64url alphabet; none for
+ * any other header. A lease's header starts {"alg":"EdDSA","typ":"JWT","kid":",
+ * a licence file's {"alg":"EdDSA","typ":"kglicense+jwt","kid":".
+ */
+std::optional<std::string> namedKeyId(std::string_view header, std::string_view start);
+
 }  // namespace keygrant::detail

@@ -38,7 +38,9 @@ TEST(Conformance, EveryGroupInTheFileIsReplayedHere) {
       // The groups after the first ones: conformance_later_test.cpp.
       "majors",       "referencedLinks", "trialReportDue",
       // Added with key sets and the entitlement helpers: conformance_keys_test.cpp.
-      "keyIds",       "keySets",         "grants"};
+      "keyIds",       "keySets",         "grants",
+      // The licence-file groups: conformance_files_test.cpp.
+      "licenseFileContainers", "licenseFiles", "filesAsLeases"};
   std::set<std::string> inFile;
   for (const auto& [name, value] : vectors().items()) {
     if (value.is_array() && !value.empty() && value.front().is_object()) inFile.insert(name);
@@ -59,7 +61,7 @@ TEST(Conformance, TheConstantsAreTheReferences) {
                                             "LOCK_GRACE_MS", "MACHINE_ID_TIMEOUT_MS", "ACTIVATE_MACHINE_ID_TIMEOUT_MS",
                                             "BOOT_SLACK_MS", "MAX_DEVICE_NAME", "MAX_KEY", "KEEP_CORRUPT",
                                             "STALE_TEMP_MS", "UPDATE_ATTEMPTS", "UNKNOWN_HOST",
-                                            "TRIAL_REPORT_MS"}));
+                                            "TRIAL_REPORT_MS", "MAX_LICENSE_FILE_BYTES"}));
   const keygrant::detail::Timings timings;
   EXPECT_EQ(c["OPEN_MAJOR"], keygrant::kOpenMajor);
   EXPECT_EQ(c["ASK_AGAIN_MS"], kAskAgainMs);
@@ -81,6 +83,7 @@ TEST(Conformance, TheConstantsAreTheReferences) {
   EXPECT_EQ(c["UPDATE_ATTEMPTS"], keygrant::kUpdateAttempts);
   EXPECT_EQ(c["UNKNOWN_HOST"], keygrant::kUnknownHost);
   EXPECT_EQ(c["TRIAL_REPORT_MS"], kTrialReportMs);
+  EXPECT_EQ(c["MAX_LICENSE_FILE_BYTES"], keygrant::kMaxLicenseFileBytes);
 }
 
 TEST(Conformance, Leases) {

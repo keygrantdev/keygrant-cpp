@@ -27,6 +27,7 @@ const char* to_string(LicenseReason value) noexcept {
     case LicenseReason::Trial: return "trial";
     case LicenseReason::Storage: return "storage";
     case LicenseReason::UnknownKey: return "unknown-key";
+    case LicenseReason::RevokedFile: return "revoked-file";
   }
   return "storage";
 }
@@ -61,6 +62,13 @@ const char* to_string(DeviceKind value) noexcept {
     case DeviceKind::Hostname: return "hostname";
   }
   return "hostname";
+}
+
+const char* to_string(LicenseSource value) noexcept {
+  switch (value) {
+    case LicenseSource::File: return "file";
+  }
+  return "file";
 }
 
 std::optional<Refusal> refusalFromString(std::string_view name) noexcept {
@@ -110,7 +118,7 @@ std::ostream& operator<<(std::ostream& out, const Entitlement& entitlement) {
 bool LicenseStatus::operator==(const LicenseStatus& other) const {
   return state == other.state && reason == other.reason && key == other.key && trialDaysLeft == other.trialDaysLeft &&
          trialEndsAt == other.trialEndsAt && test == other.test && entitlements == other.entitlements &&
-         stalled == other.stalled;
+         stalled == other.stalled && source == other.source && licensedTo == other.licensedTo;
 }
 
 std::ostream& operator<<(std::ostream& out, const LicenseStatus& status) {
@@ -130,6 +138,21 @@ std::ostream& operator<<(std::ostream& out, const LicenseStatus& status) {
     out << " }";
   }
   if (status.stalled) out << ", stalled: true";
+  if (status.source) out << ", source: " << *status.source;
+  if (status.licensedTo) out << ", licensedTo: " << *status.licensedTo;
+  return out << " }";
+}
+
+std::ostream& operator<<(std::ostream& out, LicenseSource value) { return out << to_string(value); }
+
+std::ostream& operator<<(std::ostream& out, const LicensedTo& licensedTo) {
+  out << "{";
+  const char* separator = " ";
+  if (licensedTo.name) {
+    out << separator << "name: " << *licensedTo.name;
+    separator = ", ";
+  }
+  if (licensedTo.email) out << separator << "email: " << *licensedTo.email;
   return out << " }";
 }
 
@@ -151,7 +174,7 @@ bool StoredState::operator==(const StoredState& other) const {
          keptMajor == other.keptMajor && backoffSince == other.backoffSince && backoffMs == other.backoffMs &&
          refused == other.refused && refusedMajor == other.refusedMajor && refusedFor == other.refusedFor &&
          deviceKind == other.deviceKind && verdictAt == other.verdictAt && rev == other.rev &&
-         trialReportedAt == other.trialReportedAt &&
+         trialReportedAt == other.trialReportedAt && licenseFile == other.licenseFile &&
          otherFields == other.otherFields;
 }
 

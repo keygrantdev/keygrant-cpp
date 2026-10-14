@@ -29,7 +29,7 @@ major can hold). The full guide is at https://keygrant.dev/docs.
 include(FetchContent)
 FetchContent_Declare(keygrant
   GIT_REPOSITORY https://github.com/keygrantdev/keygrant-cpp.git
-  GIT_TAG        0.4.0)
+  GIT_TAG        0.5.0)
 FetchContent_MakeAvailable(keygrant)
 
 target_link_libraries(my_app PRIVATE keygrant::keygrant)
@@ -39,7 +39,7 @@ or, with the repository vendored, `add_subdirectory(third_party/keygrant)`. Buil
 SDK builds no tests and never adds `-Werror` to your build.
 
 OpenSSL 3, libcurl and nlohmann/json must be findable by `find_package`. Installed (`cmake --install`), the SDK
-is a package: `find_package(keygrant 0.4 REQUIRED)` (a static install finds OpenSSL and CURL again for you).
+is a package: `find_package(keygrant 0.5 REQUIRED)` (a static install finds OpenSSL and CURL again for you).
 
 ### vcpkg (Windows, macOS)
 
@@ -89,8 +89,9 @@ if (!result.ok) showError(keygrant::to_string(*result.error));   // "invalid-key
 ### Qt
 
 ```cpp
-// A QObject living on the UI thread; the call runs on Qt's thread pool.
-QFuture<keygrant::LicenseStatus> future = QtConcurrent::run([this] { return license_->status(); });
+// A QObject living on the UI thread; the call runs on Qt's thread pool. license_ is a
+// std::shared_ptr<keygrant::License>: the work holds its own copy, so closing the window mid-call is safe.
+QFuture<keygrant::LicenseStatus> future = QtConcurrent::run([license = license_] { return license->status(); });
 auto* watcher = new QFutureWatcher<keygrant::LicenseStatus>(this);
 connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher] {
   applyLicence(watcher->result());   // back on the UI thread
@@ -107,17 +108,18 @@ come from any number of threads (below).
 
 | `state` | `reason` | What to do |
 |---|---|---|
-| `Licensed` | | Run. `test` is true on a test licence: refuse it in a release build if you want to. `entitlements` is what it grants (below). |
+| `Licensed` | | Run. `test` is true on a test licence: refuse it in a release build if you want to. `entitlements` is what it grants (below). With `source == LicenseSource::File`, an offline licence file licenses it: show `licensedTo` (below). |
 | `Trial` | | Run. `trialEndsAt` (ms) is the end the trial's lease was signed to, and `trialDaysLeft` counts down to it. `entitlements` is what the trial's lease grants. |
 | `Expired` | `Offline` | The lease ran out and the server could not be reached: show "connect to renew". |
 | `Expired` | `Trial` | The trial is over: its signed trial lease is no longer valid. |
 | `Invalid` | `Revoked` | The key was revoked, expired, or this device released. |
-| `Invalid` | `Upgrade` | This build is newer than the key covers: buy an upgrade (`upgradeUrl`). |
-| `Invalid` | `Outdated` | This build is older than the key's lowest version: update the app. |
+| `Invalid` | `Upgrade` | This build is newer than the key covers: buy an upgrade (`upgradeUrl`). From a file (`source == LicenseSource::File`), newer than the file covers: the customer needs a new file, as `upgradeUrl` needs an activation. |
+| `Invalid` | `Outdated` | This build is older than the key's lowest version (or the file's): update the app. |
 | `Invalid` | `Device` | The licence was activated on another device: activate on this one. |
-| `Invalid` | `Tampered` | The stored lease is not this licence (another key, product or signer). |
-| `Invalid` | `UnknownKey` | The stored lease is signed by a key this build does not carry. Online, the server renews it with the key it signs with now; when it stays so online, update the app. |
-| `Unknown` | `Storage` | The licence file could not be read just now: keep running, ask again. |
+| `Invalid` | `Tampered` | The stored lease is not this licence (another key, product or signer). From a file, the stored file was edited or is not one this build can read: import it again. |
+| `Invalid` | `RevokedFile` | The stored offline licence file is one this build lists as revoked (`revokedLicenseFiles`). |
+| `Invalid` | `UnknownKey` | The stored lease is signed by a key this build does not carry. Online, the server renews it with the key it signs with now; when it stays so online, update the app. From a file, only an app update that carries its key helps. |
+| `Unknown` | `Storage` | The state file could not be read just now: keep running, ask again. |
 | `Unlicensed` | | Nothing activated, no trial. |
 
 `stalled` is true when the answer came from storage behind a call that has not finished (below).
@@ -134,7 +136,8 @@ come from any number of threads (below).
   while its stored end is still ahead (a lease signed before the product's key was rotated, say) is asked for again,
   under the usual waits and bounded as a status check is; its answer stands, and an ask that brings back no trial
   this build can verify waits a minute (no answer) or an hour (an answer) before the next.
-- `deactivate()`: releases the seat and drops everything but the trial evidence and the clock guard, answering
+- `deactivate()`: releases the seat and drops everything but the trial evidence, the clock guard and a stored offline
+  licence file (`removeLicenseFile()` drops that), answering
   `DeactivateResult{released}`: `true` when KeyGrant answered the release with a 200, or when no key and activation
   were held; `false` when it could not be asked or answered anything else (a 5xx, a 429, a proxy's page). Then the
   seat may still be held: say so (the developer's dashboard or support can release it), rather than tell the
@@ -152,6 +155,112 @@ come from any number of threads (below).
   **activation id** (never the key), or `std::nullopt` with no activation. An upgrade sale finds the key through it.
   The link's own parameters are kept as written and in their order, any `client_reference_id` already on it is
   replaced, and the fragment is kept. Throws `std::invalid_argument` for a link that is not an absolute URL.
+
+### Licence files: drag and drop
+
+A licence can come as a file (`.kglicense`) the customer drops onto the app or opens from its licence screen. A
+**key file** carries their key: importing it activates the key online, exactly as typing it would. An **offline
+licence file** licenses the app with no network at all, for good, on machines that never connect; it has no seat
+limit and cannot be revoked, so the only way to stop one that leaked is an app update that lists its id:
+
+```cpp
+config.revokedLicenseFiles = {"lf_8Hq2"};   // ids of files that leaked: an update adds them here
+```
+
+In Qt, take the file from a drop on the window or from an open dialog, read at most a licence file's size, and
+import it off the UI thread:
+
+```cpp
+#include <keygrant/keygrant.hpp>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QFile>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QFutureWatcher>
+#include <QMimeData>
+#include <QtConcurrent>
+
+namespace {
+/// The first dropped local file that is a licence file (`keygrant::kLicenseFileExtension`), else an empty string.
+QString licenseFileIn(const QMimeData* mime) {
+  for (const QUrl& url : mime->urls()) {
+    if (url.isLocalFile() && url.toLocalFile().endsWith(QStringLiteral(".kglicense"), Qt::CaseInsensitive))
+      return url.toLocalFile();
+  }
+  return {};
+}
+
+/// Reads the file, never more than a licence file can be (a larger one is refused unread), and imports it.
+keygrant::ImportLicenseFileResult importFile(keygrant::License& license, const QString& path) {
+  QFile file(path);
+  if (!file.open(QIODevice::ReadOnly)) throw std::runtime_error("the file cannot be opened");
+  const QByteArray read = file.read(static_cast<qint64>(keygrant::kMaxLicenseFileBytes) + 1);
+  return license.importLicenseFile(std::vector<std::uint8_t>(read.begin(), read.end()));
+}
+}  // namespace
+
+// In the window's constructor: setAcceptDrops(true);
+void LicenceWindow::dragEnterEvent(QDragEnterEvent* event) {
+  if (!licenseFileIn(event->mimeData()).isEmpty()) event->acceptProposedAction();
+}
+
+void LicenceWindow::dropEvent(QDropEvent* event) {
+  const QString path = licenseFileIn(event->mimeData());
+  if (path.isEmpty()) return;
+  event->acceptProposedAction();
+  importFrom(path);
+}
+
+void LicenceWindow::openLicenceFile() {   // "Open licence file..." on the licence screen
+  const QString path = QFileDialog::getOpenFileName(this, tr("Open licence file"), {},
+                                                    tr("Licence files (*.kglicense)"));
+  if (!path.isEmpty()) importFrom(path);
+}
+
+void LicenceWindow::importFrom(const QString& path) {
+  auto* watcher = new QFutureWatcher<keygrant::ImportLicenseFileResult>(this);
+  connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher] {
+    try {
+      const keygrant::ImportLicenseFileResult result = watcher->result();
+      if (result.ok) showLicensedTo(*result.licensedTo);                        // "Licensed to Ada Lovelace"
+      else if (result.error) showError(keygrant::to_string(*result.error));     // "revoked-file", "upgrade", ...
+      else showError(keygrant::to_string(*result.activateError));               // a key file: what activate() says
+    } catch (const std::exception&) {
+      showError("try-again");   // unreadable, a call before it has not finished, or the state not saved
+    }
+    watcher->deleteLater();
+  });
+  // Read and imported off the UI thread (a file on a network share can be slow); license_ is a
+  // std::shared_ptr<keygrant::License>, held by the work.
+  watcher->setFuture(QtConcurrent::run([license = license_, path] { return importFile(*license, path); }));
+}
+```
+
+wxWidgets (`wxFileDropTarget`), Win32 (`WM_DROPFILES`) and Cocoa (`NSDraggingDestination`) hand over a path the same
+way: read the file there, and give `importLicenseFile` its bytes.
+
+`importLicenseFile` takes the file's content (`std::string_view` or `std::vector<std::uint8_t>`), never its path,
+and verifies it offline: signed by a key of `publicJwk`, for this product and, for an offline file, covering this
+build's major. It answers an `ImportLicenseFileResult`: `ok` with the file's `kind` (`LicenseFileKind::Key` or
+`Offline`) and `licensedTo`; or `error`, one of the `LicenseFileError`s `Malformed`, `NotALicenseFile`,
+`BadSignature`, `UnknownKey`, `WrongProduct`, `RevokedFile`, `Upgrade`, `Outdated`, nothing stored; or, for a key
+file whose key did not activate, `activateError`, what `activate()` answers. It throws `keygrant::StalledError` when a
+licence call before it has not finished, and the storage's exception when the state cannot be read or the file cannot
+be saved: try again. `UnknownKey` means the file was signed by a key this build does not carry: a newer one, after the
+product rotated its key, which an update of the app carries. A key file's notes print its key, which can be typed
+meanwhile.
+
+An offline file is kept and checked again on every `status()`, which then answers `Licensed` with
+`source == LicenseSource::File`, the key, `licensedTo` and the file's entitlements, never asking the server,
+`refresh()` included. Show "Licensed to Ada Lovelace" from `licensedTo`. A status from a file has no seat to
+deactivate: offer `removeLicenseFile()` instead (`deactivate()` leaves the file alone). If the device also holds a
+key, a file that covers this build wins, and the key keeps working once the file is removed, revoked or outgrown. A
+file that does not cover this build answers only when no key and no running trial does.
+
+**Keep every key that signed a file in your builds.** A file names the key that signed it and never expires, so a key
+that has signed one stays in the product's key set, and in `publicJwk`, after it stops signing leases. A build
+without it reads such a file as `Invalid` / `UnknownKey`.
 
 ### Buying from the app
 
@@ -193,6 +302,7 @@ called: a change to the trial's length or entitlements reaches a running trial t
 | `deviceName` | none | Shown in the customer's device list; cut to 120 UTF-16 units. |
 | `deviceHold` | `true` | Whether a licence is held to its device (below). |
 | `httpTimeout` | 15 s | How long any request may take; the SDK holds every request to it itself. |
+| `revokedLicenseFiles` | empty | The ids (`fid`) of offline licence files that leaked, which this build refuses: a stored one is `Invalid` / `RevokedFile` (below). |
 | `adapters` | defaults | Storage, registry stash, clock, fingerprinter, HTTP (below). |
 
 ### Embedding the public keys
@@ -216,7 +326,7 @@ without the staged key before you switch.
 ### deviceHold
 
 A lease names the device it was activated on (a hash of the OS machine id: Windows `MachineGuid`, macOS
-`IOPlatformUUID`, Linux `/etc/machine-id`), so a licence file copied to another machine does not license it.
+`IOPlatformUUID`, Linux `/etc/machine-id`), so a state file copied to another machine does not license it.
 A machine whose id cannot be read uses its host name, which is never held. Set `deviceHold = false` for a product
 on non-persistent, pooled VDI, where every session may be another machine: no lease is then judged by its device,
 and the server is sent no fingerprints. The device limit still counts seats.
@@ -296,7 +406,8 @@ before, once. `keygrant::serializeState`/`parseState` give the format to a stora
 - Calls on one `License` run **one at a time**, from any number of threads.
 - A call waits for the one before it, but not past that call's HTTP bound plus 15 s from when it started. Past
   that (an adapter stuck on a dead disk, say), it runs **read-only**: it answers from what is stored, asks nothing,
-  writes nothing, and says `stalled`. `activate()` read-only is `Network`; `deactivate()` throws `StalledError`.
+  writes nothing, and says `stalled`. `activate()` read-only is `Network`; `deactivate()`, `importLicenseFile()` and
+  `removeLicenseFile()` throw `StalledError`.
 - Every request, fingerprint and machine-id read is held to its bound by running it on a thread of its own, which
   is **abandoned** (left to finish, its answer dropped) when it outlives the bound. An HTTP adapter that ignores
   its timeout cannot hold a call open.
@@ -386,11 +497,11 @@ Where this SDK differs from the Electron SDK, and why:
   server, the hashes and the file all see the same string.
 - **Numbers are 64-bit integers**, held to JavaScript's safe range (±(2^53-1)); a lease claim or stored time beyond
   it is saturated, which keeps every comparison with a real time or major as JavaScript makes it.
-- **A lease payload nlohmann/json will not parse is refused whole**: one holding an escaped lone surrogate
-  (`"\ud800"`) or a number past a double's range (`1e400`) is `bad-claims` here, where the reference's `JSON.parse`
-  reads the first as a string and the second as `Infinity`, and keeps such an entitlement. The server never signs
-  either: its signer refuses an entitlement name or text with a lone surrogate, and an entitlement number that is not
-  finite, and every other claim is one it writes itself.
+- **A lease or licence-file payload nlohmann/json will not parse is refused whole**: one holding an escaped lone
+  surrogate (`"\ud800"`) or a number past a double's range (`1e400`) is `bad-claims` here, where the reference's
+  `JSON.parse` reads the first as a string and the second as `Infinity`, and keeps such an entitlement. The server never
+  signs either: its signer refuses an entitlement name or text with a lone surrogate, and an entitlement number that is
+  not finite, and every other claim is one it writes itself.
 - **The state file**: a leading byte-order mark is accepted (the reference sets such a file aside as corrupt); a known
   field of the wrong JSON type, or with a value this SDK does not know (a newer SDK's refusal or device kind), is read
   as absent; JSON that is not an object is no state. Fields this SDK does not know, and those values it cannot read, are
@@ -426,6 +537,11 @@ Where this SDK differs from the Electron SDK, and why:
 - `LicenseStatus::test` and `stalled` are `bool` (false where the reference leaves them out); `trialDaysLeft` and
   `trialEndsAt` are `std::optional`; `entitlements` is a `std::map`, empty where the reference leaves it out, and the
   status's own copy where the reference hands out a frozen one.
+- **Licence files**: `importLicenseFile` answers a refusal (`error`) and a key file's failed activation
+  (`activateError`) in two members, where the reference's one `error` holds either word, and throws
+  `StalledError` behind an unfinished call where the reference rejects. A stored `licenseFile` that is not text is read
+  as no file, as every known field of the wrong type is (the reference reads it as `Invalid`/`Tampered`). A whole
+  number in a file's claims past the safe range is held at its end, as a lease claim is.
 - The SDK's fixed timings exist as `keygrant::detail::Timings` so the tests can run them shorter; it is not a stable API.
 - The conformance file's Windows and macOS `machineIds` cases script `reg.exe` and `ioreg`; the suite replays them
   through the API reads this SDK makes (the printed value is the value the API returns; a command that said no, or

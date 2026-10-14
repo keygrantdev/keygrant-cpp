@@ -11,10 +11,10 @@ namespace detail {
 
 namespace {
 
-constexpr std::array<const char*, 19> kKnownFields = {
+constexpr std::array<const char*, 20> kKnownFields = {
     "key",          "activationId", "lease",        "trialStart",   "trialEndsAt",     "trialLease", "trialAt",
     "lastSeen",     "checkedMajor", "keptMajor",    "backoffSince", "backoffMs",       "refused",    "refusedMajor",
-    "refusedFor",   "deviceKind",   "verdictAt",    "rev",          "trialReportedAt",
+    "refusedFor",   "deviceKind",   "verdictAt",    "rev",          "trialReportedAt", "licenseFile",
 };
 
 /**
@@ -88,6 +88,7 @@ bool holds(const StoredState& s, const std::string& name) {
   if (name == "verdictAt") return s.verdictAt.has_value();
   if (name == "rev") return s.rev.has_value();
   if (name == "trialReportedAt") return s.trialReportedAt.has_value();
+  if (name == "licenseFile") return s.licenseFile.has_value();
   return false;
 }
 
@@ -114,6 +115,7 @@ ordered_json stateToJson(const StoredState& s) {
   put(out, "verdictAt", s.verdictAt);
   put(out, "rev", s.rev);
   put(out, "trialReportedAt", s.trialReportedAt);
+  put(out, "licenseFile", s.licenseFile);
   // Kept as written: fields this SDK does not know, and values of known ones
   // it could not read (a newer SDK's), unless it now holds a value of its own.
   // A retired name is never written.
@@ -154,6 +156,7 @@ StoredState stateFromJson(const json& object) {
   s.verdictAt = numberField(object, "verdictAt");
   s.rev = numberField(object, "rev");
   s.trialReportedAt = numberField(object, "trialReportedAt");
+  s.licenseFile = stringField(object, "licenseFile");
   // A field it does not know, or a known one whose value it cannot read (a
   // newer SDK's refusal or device kind, say), is kept to be written back.
   for (const auto& [name, value] : object.items()) {

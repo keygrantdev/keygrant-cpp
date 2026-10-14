@@ -9,7 +9,7 @@
 #define KEYGRANT_STATE_FIELDS(X)                                                                          \
   X(key) X(activationId) X(lease) X(trialStart) X(trialEndsAt) X(trialLease) X(trialAt) X(lastSeen)     \
   X(checkedMajor) X(keptMajor) X(backoffSince) X(backoffMs) X(refused) X(refusedMajor) X(refusedFor) \
-  X(deviceKind) X(verdictAt) X(rev) X(trialReportedAt)
+  X(deviceKind) X(verdictAt) X(rev) X(trialReportedAt) X(licenseFile)
 
 namespace keygrant::detail {
 

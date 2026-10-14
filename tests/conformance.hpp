@@ -1,5 +1,6 @@
-// What the conformance replays (conformance_test.cpp, conformance_later_test.cpp) share: a
-// vector's JSON inputs read as the SDK's own types, and an answer written as the file writes it.
+// What the conformance replays (conformance_test.cpp, conformance_later_test.cpp, conformance_keys_test.cpp,
+// conformance_files_test.cpp) share: a vector's JSON inputs read as the SDK's own types, and an answer written
+// as the file writes it.
 #pragma once
 
 #include <cstdint>

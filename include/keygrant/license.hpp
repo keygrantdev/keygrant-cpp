@@ -6,8 +6,11 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "keygrant/adapters.hpp"
+#include "keygrant/license_file.hpp"
 #include "keygrant/types.hpp"
 
 namespace keygrant {
@@ -48,6 +51,13 @@ struct LicenseConfig {
   bool deviceHold = true;
   /// How long a request may take before the SDK abandons it (kept whatever the HTTP adapter does).
   std::chrono::milliseconds httpTimeout = kDefaultHttpTimeout;
+  /**
+   * The ids of licence files this build refuses (a file's `fid`): how an app
+   * update stops an offline licence file that leaked, since nothing else can.
+   * Matched exactly. A stored file listed here reads as Invalid / RevokedFile;
+   * importing one is refused (LicenseFileError::RevokedFile).
+   */
+  std::vector<std::string> revokedLicenseFiles;
   /// Adapter overrides; any left empty is the default.
   Adapters adapters;
 };
@@ -114,22 +124,25 @@ class License {
 
   /**
    * The licence's status. Offline-first; asks the server only when forced or
-   * needed. Never throws: a state that cannot be read just now is `Unknown`
+   * needed, and never while a stored offline licence file licenses this build,
+   * which answers first. Never throws: a state that cannot be read just now is `Unknown`
    * (reason `Storage`), and a save that fails leaves the answer standing. A
    * running trial reports its launch to the server at most once a day, on a
    * thread of its own and never awaited.
    */
   LicenseStatus status(bool forceOnline = false);
 
-  /// status() asked online at once, whatever the waits say.
+  /// status() asked online at once, whatever the waits say; a stored offline licence file that licenses this
+  /// build still answers first, asking nothing.
   LicenseStatus refresh();
 
   /**
    * Whether the licence this device holds grants the entitlement `code`: a
    * flag that is on, a number that is not zero, or a text that is not empty
-   * (grants()). Offline, from the stored lease only: the entitlements of the
-   * status status() gives from what is stored, with no ask and no write, so a
-   * licence that does not license this build, and none at all, grant nothing.
+   * (grants()). Offline, from the stored lease or stored offline licence file
+   * only: the entitlements of the status status() gives from what is stored,
+   * with no ask and no write, so a licence that does not license this build,
+   * and none at all, grant nothing.
    * A running trial grants what its trial lease does. Never throws: a state
    * that cannot be read grants nothing just now.
    */
@@ -144,7 +157,8 @@ class License {
 
   /**
    * Release this device's activation and drop the local licence, keeping only
-   * the trial evidence and the clock guard. Answers whether the seat is now
+   * the trial evidence, the clock guard and a stored offline licence file
+   * (removeLicenseFile() drops that). Answers whether the seat is now
    * free (`released`): true when KeyGrant answered the release with a 200, or
    * when no activation was held; false when it could not be asked or answered
    * anything else, and the seat may still be held. The local licence is
@@ -169,6 +183,29 @@ class License {
    * storage adapter's exception when the state cannot be read.
    */
   std::optional<std::string> upgradeUrl(const std::string& paymentLink);
+
+  /**
+   * Take a licence file the customer was sent (.kglicense): its content, as a
+   * drop handler or an open dialog reads it, never its path. Verified offline
+   * against the build's key set, for this product and, for an offline file,
+   * this build's major; refused when revokedLicenseFiles lists it (`error`,
+   * nothing stored). An OFFLINE file is then stored, replacing any stored
+   * before, and licenses the app with no network, ever: status() answers it
+   * with source File. A KEY file's key is activated online exactly as
+   * activate() would, and what that answers is `activateError`. Throws
+   * StalledError behind a call that has not finished, and the storage
+   * adapter's exception when the state cannot be read or saved.
+   */
+  ImportLicenseFileResult importLicenseFile(std::string_view content);
+  /// As above, for the file's bytes.
+  ImportLicenseFileResult importLicenseFile(const std::vector<std::uint8_t>& content);
+
+  /**
+   * Drop the stored offline licence file, if there is one; a key this device
+   * holds keeps working. deactivate() leaves a stored file alone. Throws as
+   * importLicenseFile() does.
+   */
+  void removeLicenseFile();
 
  private:
   friend class detail::LicenseAccess;

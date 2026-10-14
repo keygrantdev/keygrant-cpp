@@ -12,10 +12,9 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <type_traits>
-#include <utility>
-#include <variant>
 #include <vector>
+
+#include "keygrant/entitlement.hpp"
 
 namespace keygrant {
 
@@ -26,7 +25,7 @@ inline constexpr std::int64_t kOpenMajor = 1'000'000;
 inline constexpr std::int64_t kMaxMajor = 99'999;
 
 /**
- * What status() says of the licence. `Unknown` (reason `Storage`): the licence
+ * What status() says of the licence. `Unknown` (reason `Storage`): the state
  * file could not be read just now (an antivirus scan holding it, say): nothing
  * is known either way, so keep running, and ask again shortly.
  */
@@ -36,9 +35,12 @@ enum class LicenseState { Licensed, Trial, Expired, Invalid, Unlicensed, Unknown
  * Why a licence does not license this build. `Upgrade`: the build is NEWER than
  * the key covers (buy an upgrade). `Outdated`: the build is OLDER than the key's
  * lowest version (update the app). `Device`: the licence was activated on
- * another device (this machine changed, or the licence file was copied from
+ * another device (this machine changed, or the state file was copied from
  * another one); activate again on this one. `Tampered`: the lease is not for
- * this licence at all. `Storage`: the licence file could not be read just now.
+ * this licence at all, or the stored licence file is not one (the state file
+ * was edited). `Storage`: the state file could not be read just now. On a
+ * status from a licence file (`source` File), `Upgrade` and `Outdated` are the
+ * file's range of versions, which no renewal changes.
  */
 enum class LicenseReason {
   Revoked,
@@ -51,7 +53,22 @@ enum class LicenseReason {
   Storage,
   /// The lease is signed by a key this build does not carry (LicenseConfig::publicJwk). Asked
   /// online, the server signs one with the key it uses now, which a build carrying that key verifies.
+  /// A stored licence file signed by such a key needs the app's update that carries it.
   UnknownKey,
+  /// The stored offline licence file is one this build lists as revoked (LicenseConfig::revokedLicenseFiles).
+  RevokedFile,
+};
+
+/** What a status rests on, when it is not a key's lease or a trial: a stored offline licence file. */
+enum class LicenseSource { File };
+
+/** Who a licence file is licensed to, as it signs it: a name, an email address, or both. */
+struct LicensedTo {
+  std::optional<std::string> name;
+  std::optional<std::string> email;
+
+  bool operator==(const LicensedTo& other) const { return name == other.name && email == other.email; }
+  bool operator!=(const LicensedTo& other) const { return !(*this == other); }
 };
 
 /** Why activate() did not activate. */
@@ -81,6 +98,7 @@ const char* to_string(LicenseReason value) noexcept;
 const char* to_string(ActivateError value) noexcept;
 const char* to_string(Refusal value) noexcept;
 const char* to_string(DeviceKind value) noexcept;
+const char* to_string(LicenseSource value) noexcept;
 
 std::optional<Refusal> refusalFromString(std::string_view name) noexcept;
 std::optional<DeviceKind> deviceKindFromString(std::string_view name) noexcept;
@@ -90,130 +108,24 @@ std::ostream& operator<<(std::ostream& out, LicenseReason value);
 std::ostream& operator<<(std::ostream& out, ActivateError value);
 std::ostream& operator<<(std::ostream& out, Refusal value);
 std::ostream& operator<<(std::ostream& out, DeviceKind value);
-
-namespace detail {
-
-/**
- * The character types (char, signed and unsigned char, wchar_t, char8_t where
- * the language has it, char16_t and char32_t): a character, never a number, so
- * never an entitlement's number either (Entitlement).
- */
-template <class T>
-struct IsCharacter : std::false_type {};
-template <>
-struct IsCharacter<char> : std::true_type {};
-template <>
-struct IsCharacter<signed char> : std::true_type {};
-template <>
-struct IsCharacter<unsigned char> : std::true_type {};
-template <>
-struct IsCharacter<wchar_t> : std::true_type {};
-#if defined(__cpp_char8_t)
-template <>
-struct IsCharacter<char8_t> : std::true_type {};
-#endif
-template <>
-struct IsCharacter<char16_t> : std::true_type {};
-template <>
-struct IsCharacter<char32_t> : std::true_type {};
-
-/// A pointer to narrow text (`const char*`, `char*`): a C string, which makes a text.
-template <class T>
-inline constexpr bool kNarrowText = std::is_same_v<std::remove_cv_t<std::remove_pointer_t<T>>, char>;
-
-/**
- * What would otherwise slip into an Entitlement as a flag, through the
- * conversion to bool every pointer, member pointer and unscoped enum has, or
- * as a number: a character; an enum; a null pointer; and a pointer that is not
- * narrow text, which takes in the wide (`L"pro"`, `TEXT("pro")` on a UNICODE
- * Win32 build), UTF-16, UTF-32 and C++20 `u8` string literals. None of them
- * is an entitlement, so none compiles as one.
- */
-template <class T>
-inline constexpr bool kNeverAnEntitlement = IsCharacter<T>::value || std::is_enum_v<T> || std::is_null_pointer_v<T> ||
-                                            std::is_member_pointer_v<T> || (std::is_pointer_v<T> && !kNarrowText<T>);
-
-}  // namespace detail
-
-/**
- * One thing a licence grants beyond the base product, as its lease signs it
- * (a member of the `ent` claim): a flag (`true`), a number (`5`) or a text
- * (`"pro"`), exactly one of them. A number is a double, as JSON and the
- * reference read one, so 5 and 5.0 are the same entitlement.
- *
- * A class over std::variant<bool, double, std::string> rather than that bare
- * variant, whose converting constructor reads against the app: built from an
- * int it does not compile (bool and double are as good as each other), and
- * built from a string literal it holds a bool wherever the standard library
- * keeps C++17's rule (a pointer converts to bool before it converts to
- * std::string; P0608 changed that, and not every library applies the change
- * in C++17 mode). Here a narrow string literal or C string is a text, any
- * number is a double, and a flag is only a bool, so `{"edition", "pro"}` and
- * `{"seats", 5}` mean what they say on every compiler, and the typed accessors
- * read a value without std::get or std::visit. What would otherwise turn into
- * the flag true or a number does not compile at all, as an entitlement or
- * compared with one: a character ('p'), an enum, a null pointer, and a wide,
- * UTF-16, UTF-32 or C++20 u8 literal (`L"pro"`, `u"pro"`, `U"pro"`, `u8"pro"`;
- * an entitlement's text is UTF-8 in a std::string). Two entitlements are
- * equal when they are the same kind and the same value: a flag never equals a
- * number or a text.
- */
-class Entitlement {
- public:
-  /// Which of the three it is.
-  enum class Kind { Flag, Number, Text };
-
-  Entitlement(bool flag) noexcept : value_(std::in_place_type<bool>, flag) {}
-  /// Any number (an int, a double, ...), held as a double. Not a character (below).
-  template <class Number, std::enable_if_t<std::is_arithmetic_v<Number> && !std::is_same_v<Number, bool> &&
-                                               !detail::IsCharacter<Number>::value,
-                                           int> = 0>
-  Entitlement(Number number) noexcept : value_(std::in_place_type<double>, static_cast<double>(number)) {}
-  /**
-   * Not from a character, an enum, a null pointer, or a pointer that is not
-   * narrow text (detail::kNeverAnEntitlement): each would otherwise be read as
-   * a number (a character's code, 112 for 'p') or, through bool, as the flag
-   * true, so it does not compile; nor does comparing an entitlement with one.
-   * std::int8_t and std::uint8_t are character types too: cast one to int.
-   */
-  template <class T, std::enable_if_t<detail::kNeverAnEntitlement<T>, int> = 0>
-  Entitlement(T) = delete;
-  Entitlement(std::string text) : value_(std::in_place_type<std::string>, std::move(text)) {}
-  Entitlement(const char* text) : value_(std::in_place_type<std::string>, text) {}
-
-  Kind kind() const noexcept { return static_cast<Kind>(value_.index()); }
-  bool isFlag() const noexcept { return kind() == Kind::Flag; }
-  bool isNumber() const noexcept { return kind() == Kind::Number; }
-  bool isText() const noexcept { return kind() == Kind::Text; }
-
-  /// The flag; none when it is a number or a text.
-  std::optional<bool> flag() const noexcept;
-  /// The number; none when it is a flag or a text.
-  std::optional<double> number() const noexcept;
-  /// The text; none when it is a flag or a number.
-  std::optional<std::string> text() const;
-
-  friend bool operator==(const Entitlement& a, const Entitlement& b) { return a.value_ == b.value_; }
-  friend bool operator!=(const Entitlement& a, const Entitlement& b) { return !(a == b); }
-
- private:
-  std::variant<bool, double, std::string> value_;
-};
-
-/// As JSON writes it: `true`, `5.0`, `"pro"`.
-std::ostream& operator<<(std::ostream& out, const Entitlement& entitlement);
+std::ostream& operator<<(std::ostream& out, LicenseSource value);
+/// "{ name: Ada Lovelace, email: ada@example.com }", each only when there is one.
+std::ostream& operator<<(std::ostream& out, const LicensedTo& licensedTo);
 
 /** What status(), refresh() and startTrial() answer. */
 struct LicenseStatus {
   LicenseState state = LicenseState::Unlicensed;
   std::optional<LicenseReason> reason;
+  /// The licence key; on a status from a licence file that is Licensed, or Invalid with RevokedFile,
+  /// Upgrade or Outdated, the key the file records; none on any other status from a file.
   std::optional<std::string> key;
   std::optional<std::int64_t> trialDaysLeft;
   /// When the trial ends (ms since the epoch).
   std::optional<std::int64_t> trialEndsAt;
   /**
    * A TEST licence: one the developer made to exercise their app, which lapses
-   * on its own within 30 days. It licenses the app like any other; check this
+   * on its own within 30 days (an offline licence file made for one never does:
+   * it is a file). It licenses the app like any other; check this
    * to refuse test licences in a release build.
    */
   bool test = false;
@@ -224,9 +136,10 @@ struct LicenseStatus {
    *   const auto edition = status.entitlements.find("edition");
    *   const bool pro = edition != status.entitlements.end() && edition->second == "pro";
    *
-   * On a `Licensed` status, from the licence's lease; on a `Trial` status,
-   * from the trial's. Empty on every other status (a stored refusal included,
-   * whatever the lease held grants), and when the lease grants none. A member
+   * On a `Licensed` status, from the licence's lease, or the stored offline
+   * licence file's `ent`; on a `Trial` status, from the trial's. Empty on
+   * every other status (a stored refusal included, whatever the lease held
+   * grants), and when the lease grants none. A member
    * of the claim that is not a flag, a number or a text is left out, and never
    * costs the licence. The status's own copy: changing it changes nothing the
    * next status says.
@@ -238,6 +151,16 @@ struct LicenseStatus {
    * no write. A restart clears it.
    */
   bool stalled = false;
+  /**
+   * `File` when the status rests on a stored offline licence file
+   * (License::importLicenseFile), licensed or not; none for a key's lease, a
+   * trial and no licence. A file holds no seat: offer to remove it
+   * (License::removeLicenseFile) rather than deactivating.
+   */
+  std::optional<LicenseSource> source;
+  /// Who the stored licence file is licensed to, on a file status that is Licensed, or Invalid with
+  /// RevokedFile, Upgrade or Outdated; none otherwise.
+  std::optional<LicensedTo> licensedTo;
 
   /// Every member alike, the entitlements by content (each name and value; numbers as numbers).
   bool operator==(const LicenseStatus& other) const;
@@ -319,6 +242,8 @@ struct StoredState {
   std::optional<std::int64_t> rev;
   /// When (guarded clock) a running trial last reported its launch.
   std::optional<std::int64_t> trialReportedAt;
+  /// The stored offline licence file's token, as importLicenseFile stored it; verified again on every status.
+  std::optional<std::string> licenseFile;
   /**
    * What this SDK cannot read, as raw JSON text by name: fields it does not
    * know (a newer SDK's), and values of known fields it cannot read (a newer
@@ -359,7 +284,10 @@ class IoError : public std::runtime_error {
   std::string code_;
 };
 
-/** deactivate() behind a call that has not finished (nothing was released or dropped). */
+/**
+ * deactivate(), importLicenseFile() or removeLicenseFile() behind a call that
+ * has not finished (nothing was released, dropped or written).
+ */
 class StalledError : public std::runtime_error {
  public:
   StalledError();

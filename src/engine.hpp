@@ -19,6 +19,7 @@
 #include "json_util.hpp"
 #include "keygrant/license.hpp"
 #include "lease.hpp"
+#include "license_file.hpp"
 #include "offline.hpp"
 #include "renewal.hpp"
 #include "wire.hpp"
@@ -42,6 +43,8 @@ class Engine {
   DeactivateResult deactivate();
   LicenseStatus startTrial();
   std::optional<std::string> upgradeUrl(const std::string& paymentLink);
+  ImportLicenseFileResult importLicenseFile(std::string_view content);
+  void removeLicenseFile();
 
   /**
    * Test support, not public API: whether the launch report in flight, if
@@ -150,12 +153,19 @@ class Engine {
   StoredState noteKept(const StoredState& state, const LeaseClaims& claims, std::int64_t now);
   LicenseStatus trialStatus(const StoredState& state, std::int64_t now,
                             const std::optional<StatusAsk>& ask = std::nullopt);
+  LicenseStatus trialOrFile(const StoredState& state, std::int64_t now, const std::optional<LicenseStatus>& file,
+                            const StatusAsk& ask);
   std::optional<LicenseStatus> healTrial(const StoredState& state, bool forceOnline);
   TrialAsk askTrial(const StoredState& state, Milliseconds machineIdTimeout,
                     std::optional<Milliseconds> timeout = std::nullopt);
   bool keepsItsTrialLease(const StoredState& state, const std::optional<std::string>& answered);
   std::optional<StoredState> loadForStatus(bool readOnly);
   void saveUnsavedTrial();
+
+  // --- licence files (license_files.cpp) ------------------------------------
+  ImportLicenseFileResult importNow(std::string_view content);
+  LicenseFileCheck checkFile(const std::string& token) const;
+  std::optional<LicenseStatus> fileStatus(const StoredState& state) const;
 
   // --- the launch report (trials.cpp) --------------------------------------
   void reportLaunch(const StoredState& state, std::int64_t now);
@@ -169,6 +179,8 @@ class Engine {
   Milliseconds httpTimeout_;
   Timings timings_;
   KeySet keys_;
+  /// The ids of licence files this build refuses (LicenseConfig::revokedLicenseFiles).
+  std::vector<std::string> revoked_;
   Adapters a_;
   /// Shared with a launch report's thread, which may outlive the engine.
   std::shared_ptr<DeviceIdentityReader> reader_;
