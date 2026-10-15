@@ -36,14 +36,14 @@ class Engine {
  public:
   Engine(LicenseConfig config, const Timings& timings);
 
-  ActivateResult activate(const std::string& key);
+  ActivateResult activate(const std::string& key, const ActivateOptions& options);
   LicenseStatus status(bool forceOnline);
   /// Whether the stored licence grants `code`, offline (License::has).
   bool has(const std::string& code);
   DeactivateResult deactivate();
   LicenseStatus startTrial();
   std::optional<std::string> upgradeUrl(const std::string& paymentLink);
-  ImportLicenseFileResult importLicenseFile(std::string_view content);
+  ImportLicenseFileResult importLicenseFile(std::string_view content, const ActivateOptions& options);
   void removeLicenseFile();
 
   /**
@@ -142,7 +142,7 @@ class Engine {
   ordered_json kidsJson() const;
 
   // --- decisions (license.cpp) ---------------------------------------------
-  ActivateResult activateNow(const std::string& key);
+  ActivateResult activateNow(const std::string& key, const ActivateOptions& options);
   DeactivateResult deactivateNow();
   bool seatElsewhere(const StoredState& state);
   LicenseStatus statusNow(const StoredState& state, bool forceOnline, bool readOnly);
@@ -163,7 +163,7 @@ class Engine {
   void saveUnsavedTrial();
 
   // --- licence files (license_files.cpp) ------------------------------------
-  ImportLicenseFileResult importNow(std::string_view content);
+  ImportLicenseFileResult importNow(std::string_view content, const ActivateOptions& options);
   LicenseFileCheck checkFile(const std::string& token) const;
   std::optional<LicenseStatus> fileStatus(const StoredState& state) const;
 

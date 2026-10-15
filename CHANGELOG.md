@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.0
+
+- User-locked keys: `License::activate(key, options)` and `License::importLicenseFile(content, options)`,
+  overloads that take a `keygrant::ActivateOptions`. A licence model can let only the person a key was sold to
+  activate a new device on it, known by the address on the key (`email`), and, for a key that mails a code to that
+  address, by the code too (`code`). Both are optional strings; the existing calls are as they were and send
+  neither. Only a new device is ever asked: `refresh()`, `status()`, a renewal, a seat the key already holds and
+  offline behaviour are unchanged. Nothing about the address or the code is stored.
+- `ActivateError` has seven more enumerators, the refusals an app can act on: `UserEmailRequired` (ask for the
+  address), `UserEmailMismatch`, `UserCodeRequired` (a code was just mailed: ask for it), `UserCodeInvalid`,
+  `TooManyCodes`, `TooManyAttempts` and `TryAgain` (the code could not be sent: nothing was activated, ask again).
+  `to_string` gives the server's words (`user-email-required`, ...). A `switch` over every `ActivateError` has seven
+  more cases.
+- An address longer than 254 UTF-16 units, or a code that is not exactly six ASCII digits (spaces inside it are
+  dropped first), is refused by the SDK itself, for any key, before the server is asked (`UserEmailMismatch`,
+  `UserCodeInvalid`). The conformance vectors' two new groups, `typedFor` and `userLockErrors`, hold this to the
+  reference. The 0.x SONAME carries the minor version, so the library is `libkeygrant.so.0.6`.
+
 ## 0.5.0
 
 - Licence files: `License::importLicenseFile(content)` takes a `.kglicense` file's content

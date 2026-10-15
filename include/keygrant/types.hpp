@@ -84,6 +84,21 @@ enum class ActivateError {
   NotConfigured,
   /// The server returned a lease that failed offline verification (an integrity or config error).
   InvalidLease,
+  /// A user-locked key asks a NEW device who it is: ask the person for the address the key was sold to and
+  /// activate again with it (ActivateOptions::email).
+  UserEmailRequired,
+  /// Not the key's address (or longer than any); nothing is said of the real one: ask again.
+  UserEmailMismatch,
+  /// A code was just mailed to that address: ask for it and activate again with the address and the code.
+  UserCodeRequired,
+  /// The code is wrong, expired, used or not six digits: ask again, or activate with the address alone for a new one.
+  UserCodeInvalid,
+  /// Three codes were sent for the key this hour: wait, or use the code sent.
+  TooManyCodes,
+  /// Too many wrong addresses or codes for the key this hour: try again later.
+  TooManyAttempts,
+  /// The code could not be sent just now and nothing was activated: try again.
+  TryAgain,
 };
 
 /** A definitive refusal from the server, as StoredState::refused keeps it. */

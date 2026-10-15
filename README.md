@@ -29,7 +29,7 @@ major can hold). The full guide is at https://keygrant.dev/docs.
 include(FetchContent)
 FetchContent_Declare(keygrant
   GIT_REPOSITORY https://github.com/keygrantdev/keygrant-cpp.git
-  GIT_TAG        0.5.0)
+  GIT_TAG        0.6.0)
 FetchContent_MakeAvailable(keygrant)
 
 target_link_libraries(my_app PRIVATE keygrant::keygrant)
@@ -39,7 +39,7 @@ or, with the repository vendored, `add_subdirectory(third_party/keygrant)`. Buil
 SDK builds no tests and never adds `-Werror` to your build.
 
 OpenSSL 3, libcurl and nlohmann/json must be findable by `find_package`. Installed (`cmake --install`), the SDK
-is a package: `find_package(keygrant 0.5 REQUIRED)` (a static install finds OpenSSL and CURL again for you).
+is a package: `find_package(keygrant 0.6 REQUIRED)` (a static install finds OpenSSL and CURL again for you).
 
 ### vcpkg (Windows, macOS)
 
@@ -126,12 +126,14 @@ come from any number of threads (below).
 
 `activate()` errors: `InvalidKey`, `Limit` (no seat left), `Revoked`, `Upgrade`, `Outdated`, `Network`
 (no answer, or one it could not use: try again), `InvalidLease` (the server's lease did not verify here: a wrong
-`publicJwk` or `product`). `NotConfigured` is named for parity and never returned.
+`publicJwk` or `product`), and the seven errors of a user-locked key ([below](#user-locked-keys)). `NotConfigured` is
+named for parity and never returned.
 
 ### The calls
 
-- `activate(key)`: the key is trimmed and upper-cased first; empty or over 120 characters is `InvalidKey` without
-  asking. Throws when the stored state cannot be read or saved (the storage's exception, e.g. `keygrant::IoError`).
+- `activate(key)`, `activate(key, options)`: the key is trimmed and upper-cased first; empty or over 120 characters is
+  `InvalidKey` without asking. Throws when the stored state cannot be read or saved (the storage's exception, e.g.
+  `keygrant::IoError`). `options` is what a person typed for a user-locked key ([below](#user-locked-keys)).
 - `status(forceOnline = false)`, `refresh()` (= `status(true)`): never throw. A trial whose lease does not verify
   while its stored end is still ahead (a lease signed before the product's key was rotated, say) is asked for again,
   under the usual waits and bounded as a status check is; its answer stands, and an ask that brings back no trial
@@ -240,7 +242,8 @@ void LicenceWindow::importFrom(const QString& path) {
 wxWidgets (`wxFileDropTarget`), Win32 (`WM_DROPFILES`) and Cocoa (`NSDraggingDestination`) hand over a path the same
 way: read the file there, and give `importLicenseFile` its bytes.
 
-`importLicenseFile` takes the file's content (`std::string_view` or `std::vector<std::uint8_t>`), never its path,
+`importLicenseFile` takes the file's content (`std::string_view` or `std::vector<std::uint8_t>`, and optionally
+the `ActivateOptions` of a user-locked key, passed on to a key file's activation), never its path,
 and verifies it offline: signed by a key of `publicJwk`, for this product and, for an offline file, covering this
 build's major. It answers an `ImportLicenseFileResult`: `ok` with the file's `kind` (`LicenseFileKind::Key` or
 `Offline`) and `licensedTo`; or `error`, one of the `LicenseFileError`s `Malformed`, `NotALicenseFile`,
@@ -261,6 +264,52 @@ file that does not cover this build answers only when no key and no running tria
 **Keep every key that signed a file in your builds.** A file names the key that signed it and never expires, so a key
 that has signed one stays in the product's key set, and in `publicJwk`, after it stops signing leases. A build
 without it reads such a file as `Invalid` / `UnknownKey`.
+
+### User-locked keys
+
+A licence model can let only the person a key was sold to activate a NEW device on it: the activation names the
+address on the key and, for a key that mails a code to that address, the code too. Only a new device is ever asked;
+`status()`, `refresh()`, a renewal, a seat the key already holds and everything offline are as they were, so an app
+that is activated keeps running through a KeyGrant or mail outage.
+
+`activate(key, options)` carries what the person typed (`keygrant::ActivateOptions`; each member is an optional
+string, and neither is ever stored):
+
+```cpp
+keygrant::ActivateOptions options;
+options.email = emailField.text();
+options.code = codeField.text();
+const keygrant::ActivateResult result = license.activate(key, options);
+if (!result.ok) {
+  switch (*result.error) {
+    case keygrant::ActivateError::UserEmailRequired:
+    case keygrant::ActivateError::UserEmailMismatch: askForTheAddress(); break;  // then activate again with it
+    case keygrant::ActivateError::UserCodeRequired:
+    case keygrant::ActivateError::UserCodeInvalid: askForTheCode(); break;       // a code was just mailed to it
+    case keygrant::ActivateError::TooManyCodes:
+    case keygrant::ActivateError::TooManyAttempts: askToTryLater(); break;
+    case keygrant::ActivateError::TryAgain: askToRetry(); break;                  // nothing was activated
+    default: showTheOtherErrors(); break;
+  }
+}
+```
+
+| `ActivateError` (its word) | Means | The app |
+|---|---|---|
+| `UserEmailRequired` (`user-email-required`) | the key is locked and no address came | ask for the address |
+| `UserEmailMismatch` (`user-email-mismatch`) | not the key's address (nothing is said of the real one) | ask again |
+| `UserCodeRequired` (`user-code-required`) | the address was right and a code was just mailed to it | ask for the code |
+| `UserCodeInvalid` (`user-code-invalid`) | the code is wrong, expired (10 minutes) or used, or the key's codes are void for the hour after five wrong ones | ask again, or activate with the address alone for a new code |
+| `TooManyCodes` (`too-many-codes`) | three codes were mailed for the key this hour | wait, or use the code sent |
+| `TooManyAttempts` (`too-many-attempts`) | ten wrong addresses this hour, or the key's codes void | try again later |
+| `TryAgain` (`try-again`) | the code could not be mailed: nothing was activated | retry; the one error here that is nobody's mistake |
+
+The address is trimmed (it is compared without regard to case) and a blank is none. The code has its ends trimmed and
+its spaces dropped (`123 456` is `123456`), and must be exactly six ASCII digits. An address longer than 254 UTF-16
+units, or a code that is not six digits, answers `UserEmailMismatch` or `UserCodeInvalid` at once, for any key, asking
+the server nothing and so costing the key none of its wrong tries; the key is judged first, then the address, then the
+code. A key that is not locked ignores both once they reach the server. `importLicenseFile(content, options)` passes
+them on to a key file's key. `deactivate()`, `refresh()` and `startTrial()` take neither.
 
 ### Buying from the app
 
@@ -542,6 +591,9 @@ Where this SDK differs from the Electron SDK, and why:
   `StalledError` behind an unfinished call where the reference rejects. A stored `licenseFile` that is not text is read
   as no file, as every known field of the wrong type is (the reference reads it as `Invalid`/`Tampered`). A whole
   number in a file's claims past the safe range is held at its end, as a lease claim is.
+- **User-locked keys**: `activate(key, options)` and `importLicenseFile(content, options)` are overloads with an
+  `ActivateOptions` struct, where the reference takes an optional second argument; a code is text here, where the
+  reference also reads a code kept as a number.
 - The SDK's fixed timings exist as `keygrant::detail::Timings` so the tests can run them shorter; it is not a stable API.
 - The conformance file's Windows and macOS `machineIds` cases script `reg.exe` and `ioreg`; the suite replays them
   through the API reads this SDK makes (the printed value is the value the API returns; a command that said no, or

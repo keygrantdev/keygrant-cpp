@@ -5,12 +5,12 @@
 
 namespace keygrant::detail {
 
-ImportLicenseFileResult Engine::importLicenseFile(std::string_view content) {
+ImportLicenseFileResult Engine::importLicenseFile(std::string_view content, const ActivateOptions& options) {
   ImportLicenseFileResult result;
   serial([&](bool readOnly) {
     // A customer's own action, which writes: never behind a call that has not settled.
     if (readOnly) throw StalledError();
-    result = importNow(content);
+    result = importNow(content, options);
   });
   return result;
 }
@@ -25,7 +25,7 @@ void Engine::removeLicenseFile() {
   });
 }
 
-ImportLicenseFileResult Engine::importNow(std::string_view content) {
+ImportLicenseFileResult Engine::importNow(std::string_view content, const ActivateOptions& options) {
   const std::optional<std::string> token = licenseFileToken(content);
   if (!token) return ImportLicenseFileResult::refused(LicenseFileError::Malformed);
   const LicenseFileCheck check = checkFile(*token);
@@ -35,7 +35,7 @@ ImportLicenseFileResult Engine::importNow(std::string_view content) {
   const LicenseFileClaims& claims = *check.claims;
   if (claims.kind == LicenseFileKind::Key) {
     // As activate() would, its storage failures thrown as there.
-    const ActivateResult activated = activateNow(claims.sub);
+    const ActivateResult activated = activateNow(claims.sub, options);
     if (!activated.ok) return ImportLicenseFileResult::notActivated(activated.error.value_or(ActivateError::Network));
     return ImportLicenseFileResult::taken(LicenseFileKind::Key, licensedToOf(claims));
   }

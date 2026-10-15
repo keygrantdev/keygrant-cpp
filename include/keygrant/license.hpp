@@ -62,6 +62,28 @@ struct LicenseConfig {
   Adapters adapters;
 };
 
+/**
+ * What a person typed for a user-locked key, for License::activate and License::importLicenseFile: the address
+ * the key was sold to and, for a key that mails a code to it, the code that came. Each is optional, and
+ * neither is ever stored.
+ *
+ * A licence model can let only the person a key was sold to activate a NEW device on it. The first activation
+ * of such a key answers ActivateError::UserEmailRequired; with the address, ActivateError::UserCodeRequired (a
+ * code was just mailed) or a lease; with the code, a lease. A key that is not locked ignores both once they
+ * reach the server, but an address longer than any, or a code that is not six digits, is refused here for any
+ * key (UserEmailMismatch, UserCodeInvalid) before anything is asked of the server.
+ *
+ *   license.activate(key, {std::string("mara@studio.example"), std::nullopt});
+ */
+struct ActivateOptions {
+  /// The address the key was sold to, as the person typed it. The ends are trimmed and a blank is none; the
+  /// server compares it without regard to case.
+  std::optional<std::string> email;
+  /// The code mailed to that address, as the person typed it. The ends are trimmed and the spaces inside
+  /// dropped ("123 456" is "123456"); a blank is none. It must be exactly six ASCII digits.
+  std::optional<std::string> code;
+};
+
 namespace detail {
 class Engine;
 class LicenseAccess;
@@ -119,8 +141,21 @@ class License {
    * Activate a licence key on this device. The key is trimmed and upper-cased.
    * Throws when the stored state cannot be read or saved (the storage
    * adapter's exception, e.g. IoError): the customer asked, and can try again.
+   *
+   * A user-locked key asks a new device who it is, and answers
+   * ActivateError::UserEmailRequired here: the overload below carries the address and the code.
    */
   ActivateResult activate(const std::string& key);
+
+  /**
+   * As above, with what a person typed for a user-locked key (ActivateOptions): its address and, for a key
+   * that mails a code to it, the code. Nothing is stored. The key is judged first, then the address, then the
+   * code: an address longer than any answers ActivateError::UserEmailMismatch, and a code that is not six
+   * digits ActivateError::UserCodeInvalid, at once and for any key, asking nothing (so costing the key none
+   * of its wrong tries). Only an activation takes them: refresh(), deactivate() and startTrial() never ask a
+   * device who it is.
+   */
+  ActivateResult activate(const std::string& key, const ActivateOptions& options);
 
   /**
    * The licence's status. Offline-first; asks the server only when forced or
@@ -199,6 +234,12 @@ class License {
   ImportLicenseFileResult importLicenseFile(std::string_view content);
   /// As above, for the file's bytes.
   ImportLicenseFileResult importLicenseFile(const std::vector<std::uint8_t>& content);
+  /// As above, with what a person typed for a user-locked key, passed on to a key file's activation exactly as
+  /// activate() takes it. An offline file ignores it, and a file that is no licence file is refused before any
+  /// key is asked for.
+  ImportLicenseFileResult importLicenseFile(std::string_view content, const ActivateOptions& options);
+  /// As above, for the file's bytes.
+  ImportLicenseFileResult importLicenseFile(const std::vector<std::uint8_t>& content, const ActivateOptions& options);
 
   /**
    * Drop the stored offline licence file, if there is one; a key this device

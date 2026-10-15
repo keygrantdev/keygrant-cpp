@@ -50,6 +50,28 @@ std::optional<std::string> errorWord(const json& body);
 /// An activation's error, from the server's error word.
 ActivateError mapServerError(const std::optional<std::string>& error);
 
+/// The longest address the endpoint takes, in UTF-16 units; a longer one is no key's address.
+inline constexpr std::size_t kMaxEmail = 254;
+/// How many digits a code has.
+inline constexpr std::size_t kCodeDigits = 6;
+
+/**
+ * What an activation sends for what a person typed for a user-locked key: the address and the code, each
+ * only when there is one, or the error that refuses them before anything is sent.
+ */
+struct Typed {
+  std::optional<std::string> email;
+  std::optional<std::string> code;
+  std::optional<ActivateError> refused;
+};
+
+/**
+ * What an activation sends for the address and code a person typed, or the error that refuses them first: an
+ * address longer than any is UserEmailMismatch, a code that is not six digits UserCodeInvalid; the address is
+ * judged first.
+ */
+Typed typedFor(const std::optional<std::string>& email, const std::optional<std::string>& code);
+
 /// The definitive refusal a validate's error is, or none for any other error.
 std::optional<Refusal> refusalOf(const std::optional<std::string>& error);
 

@@ -35,7 +35,44 @@ ActivateError mapServerError(const std::optional<std::string>& error) {
   if (*error == "revoked" || *error == "expired") return ActivateError::Revoked;
   if (*error == "upgrade-required") return ActivateError::Upgrade;
   if (*error == "update-required") return ActivateError::Outdated;
+  // A user-locked key's new device: each word is its own error.
+  if (*error == "user-email-required") return ActivateError::UserEmailRequired;
+  if (*error == "user-email-mismatch") return ActivateError::UserEmailMismatch;
+  if (*error == "user-code-required") return ActivateError::UserCodeRequired;
+  if (*error == "user-code-invalid") return ActivateError::UserCodeInvalid;
+  if (*error == "too-many-codes") return ActivateError::TooManyCodes;
+  if (*error == "too-many-attempts") return ActivateError::TooManyAttempts;
+  if (*error == "try-again") return ActivateError::TryAgain;
   return ActivateError::Network;
+}
+
+Typed typedFor(const std::optional<std::string>& email, const std::optional<std::string>& code) {
+  Typed out;
+  // The address, trimmed as a key is: a blank is none, and a longer one can match no key's address. The server
+  // compares it without regard to case, so it is sent as typed.
+  std::string enteredEmail = email ? jsTrim(*email) : std::string();
+  if (utf16Length(enteredEmail) > kMaxEmail) {
+    out.refused = ActivateError::UserEmailMismatch;
+    return out;
+  }
+  // The code, its ends trimmed as a key's are and then its spaces (U+0020) dropped, since a code read off an
+  // email is typed as 123 456 as often as 123456: exactly six ASCII digits, else refused. A byte of 0x20 is
+  // only ever U+0020 in UTF-8, so dropping bytes drops exactly those.
+  std::string enteredCode;
+  if (code) {
+    for (const char c : jsTrim(*code)) {
+      if (c != ' ') enteredCode.push_back(c);
+    }
+  }
+  const bool sixDigits = enteredCode.size() == kCodeDigits &&
+                         std::all_of(enteredCode.begin(), enteredCode.end(), [](char c) { return c >= '0' && c <= '9'; });
+  if (!enteredCode.empty() && !sixDigits) {
+    out.refused = ActivateError::UserCodeInvalid;
+    return out;
+  }
+  if (!enteredEmail.empty()) out.email = std::move(enteredEmail);
+  if (!enteredCode.empty()) out.code = std::move(enteredCode);
+  return out;
 }
 
 std::optional<Refusal> refusalOf(const std::optional<std::string>& error) {

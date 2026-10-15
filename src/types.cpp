@@ -42,6 +42,13 @@ const char* to_string(ActivateError value) noexcept {
     case ActivateError::Network: return "network";
     case ActivateError::NotConfigured: return "not-configured";
     case ActivateError::InvalidLease: return "invalid-lease";
+    case ActivateError::UserEmailRequired: return "user-email-required";
+    case ActivateError::UserEmailMismatch: return "user-email-mismatch";
+    case ActivateError::UserCodeRequired: return "user-code-required";
+    case ActivateError::UserCodeInvalid: return "user-code-invalid";
+    case ActivateError::TooManyCodes: return "too-many-codes";
+    case ActivateError::TooManyAttempts: return "too-many-attempts";
+    case ActivateError::TryAgain: return "try-again";
   }
   return "network";
 }

@@ -24,11 +24,13 @@ LicenseStatus unlicensed() { return LicenseStatus{}; }
 
 // --- the public calls ------------------------------------------------------
 
-ActivateResult Engine::activate(const std::string& key) {
+ActivateResult Engine::activate(const std::string& key, const ActivateOptions& options) {
   ActivateResult result;
   // Behind a call that has not settled, nothing may be written: answered as
   // not reaching the server, to retry.
-  serial([&](bool readOnly) { result = readOnly ? ActivateResult::failure(ActivateError::Network) : activateNow(key); });
+  serial([&](bool readOnly) {
+    result = readOnly ? ActivateResult::failure(ActivateError::Network) : activateNow(key, options);
+  });
   return result;
 }
 
@@ -104,9 +106,13 @@ std::optional<std::string> Engine::upgradeUrl(const std::string& paymentLink) {
 
 // --- what each does ----------------------------------------------------------
 
-ActivateResult Engine::activateNow(const std::string& key) {
+ActivateResult Engine::activateNow(const std::string& key, const ActivateOptions& options) {
   const std::optional<std::string> entered = enteredKey(key);
   if (!entered) return ActivateResult::failure(ActivateError::InvalidKey);
+  // What a person typed for a user-locked key: one that can be no address, or no code, is refused here, before
+  // anything is asked of the server or its wrong tries are spent.
+  const Typed typed = typedFor(options.email, options.code);
+  if (typed.refused) return ActivateResult::failure(*typed.refused);
   // Install memory protects the seat this install holds: re-activating that
   // key keeps to it; a first activation, or another key's, starts afresh.
   const StoredState stored = load();
@@ -124,6 +130,8 @@ ActivateResult Engine::activateNow(const std::string& key) {
   if (deviceName_) body["name"] = *deviceName_;
   body["major"] = major_;
   body["kids"] = kidsJson();
+  if (typed.email) body["email"] = *typed.email;
+  if (typed.code) body["code"] = *typed.code;
   const std::optional<Reply> reply = post("activate", body);
   if (!reply) return ActivateResult::failure(ActivateError::Network);
   if (reply->status != 200) return ActivateResult::failure(mapServerError(errorWord(reply->body)));
@@ -278,9 +286,11 @@ License::~License() = default;
 // Each call holds the engine for as long as it runs, so a License destroyed
 // while a call is stuck in an adapter leaves that call to finish safely.
 
-ActivateResult License::activate(const std::string& key) {
+ActivateResult License::activate(const std::string& key) { return activate(key, ActivateOptions{}); }
+
+ActivateResult License::activate(const std::string& key, const ActivateOptions& options) {
   const std::shared_ptr<detail::Engine> engine = engine_;
-  return engine->activate(key);
+  return engine->activate(key, options);
 }
 
 LicenseStatus License::status(bool forceOnline) {
@@ -310,13 +320,23 @@ LicenseStatus License::startTrial() {
 }
 
 ImportLicenseFileResult License::importLicenseFile(std::string_view content) {
-  const std::shared_ptr<detail::Engine> engine = engine_;
-  return engine->importLicenseFile(content);
+  return importLicenseFile(content, ActivateOptions{});
 }
 
 ImportLicenseFileResult License::importLicenseFile(const std::vector<std::uint8_t>& content) {
+  return importLicenseFile(content, ActivateOptions{});
+}
+
+ImportLicenseFileResult License::importLicenseFile(std::string_view content, const ActivateOptions& options) {
   const std::shared_ptr<detail::Engine> engine = engine_;
-  return engine->importLicenseFile(std::string_view(reinterpret_cast<const char*>(content.data()), content.size()));
+  return engine->importLicenseFile(content, options);
+}
+
+ImportLicenseFileResult License::importLicenseFile(const std::vector<std::uint8_t>& content,
+                                                   const ActivateOptions& options) {
+  const std::shared_ptr<detail::Engine> engine = engine_;
+  return engine->importLicenseFile(std::string_view(reinterpret_cast<const char*>(content.data()), content.size()),
+                                   options);
 }
 
 void License::removeLicenseFile() {

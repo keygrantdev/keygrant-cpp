@@ -33,6 +33,12 @@ TEST(EnteredKey, MeasuresTheNormalisedKeyInUtf16Units) {
   EXPECT_FALSE(enteredKey(std::string(119, 'K') + "\xC3\x9F"));
 }
 
+TEST(TypedFor, RefusesACodeHoldingBytesThatAreNotUtf8) {
+  // The vectors are JSON and cannot carry invalid UTF-8. An ill-formed byte is one U+FFFD, as the reference
+  // reads it, and no digit: six digits and that make no code, where dropping the byte would leave one.
+  EXPECT_EQ(typedFor(std::nullopt, std::string("123456\xFF")).refused, keygrant::ActivateError::UserCodeInvalid);
+}
+
 TEST(TrimToLength, CutsWithoutSplittingACharacter) {
   const std::string emoji = "\xF0\x9F\x98\x80";
   EXPECT_EQ(trimToLength(std::string(119, 'D') + emoji, 120), std::string(119, 'D'));

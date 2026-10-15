@@ -338,8 +338,12 @@ TEST(Serial, OverlappingStatusCallsAskOneQuestionAndTheRefusalSurvives) {
 }
 
 TEST(Serial, ThreeCallsQueuedAtOnceOnASlowNetworkRunOneAfterAnotherEachAsking) {
-  // Each answer takes 250 ms inside a 600 ms bound: the second and third wait for the one before.
-  Harness h(std::nullopt, quick(Millis{600}));
+  // Each answer takes 250 ms, far inside the 5 s bound, and the grace is long enough that the second and third
+  // wait for the one before however slow this machine is just now (a wait past the grace would run them
+  // read-only, stalled, asking nothing). The 250 ms only lets the test see whether two asks ever overlap.
+  HarnessOptions options = quick(Millis{5'000});
+  options.timings.lockGrace = Millis{10'000};
+  Harness h(std::nullopt, options);
   const std::string lease = h.sign(KEY, "perpetual", 30 * 24 * 3600);
   h.store(held(lease));
   std::atomic<int> inFlight{0};

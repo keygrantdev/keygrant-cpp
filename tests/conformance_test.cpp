@@ -40,7 +40,9 @@ TEST(Conformance, EveryGroupInTheFileIsReplayedHere) {
       // Added with key sets and the entitlement helpers: conformance_keys_test.cpp.
       "keyIds",       "keySets",         "grants",
       // The licence-file groups: conformance_files_test.cpp.
-      "licenseFileContainers", "licenseFiles", "filesAsLeases"};
+      "licenseFileContainers", "licenseFiles", "filesAsLeases",
+      // The user-lock groups: conformance_user_lock_test.cpp.
+      "typedFor",     "userLockErrors"};
   std::set<std::string> inFile;
   for (const auto& [name, value] : vectors().items()) {
     if (value.is_array() && !value.empty() && value.front().is_object()) inFile.insert(name);

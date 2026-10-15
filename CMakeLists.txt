@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(keygrant
-  VERSION 0.5.0
+  VERSION 0.6.0
   DESCRIPTION "KeyGrant licensing SDK for native desktop apps"
   LANGUAGES CXX)
 
@@ -64,7 +64,7 @@ add_library(keygrant::keygrant ALIAS keygrant)
 include(GNUInstallDirs)
 
 # A 0.x minor may change the library's ABI, so while the major is 0 the shared library's SONAME
-# carries the minor too (libkeygrant.so.0.5); from 1.0 on, the major alone.
+# carries the minor too (libkeygrant.so.0.6); from 1.0 on, the major alone.
 if(PROJECT_VERSION_MAJOR EQUAL 0)
   set(KEYGRANT_SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
 else()
@@ -127,6 +127,7 @@ if(KEYGRANT_BUILD_TESTS)
     tests/conformance_later_test.cpp
     tests/conformance_support.cpp
     tests/conformance_test.cpp
+    tests/conformance_user_lock_test.cpp
     tests/crypto_test.cpp
     tests/http_test.cpp
     tests/launch_report_test.cpp
@@ -141,6 +142,7 @@ if(KEYGRANT_BUILD_TESTS)
     tests/license_status_test.cpp
     tests/license_timing_test.cpp
     tests/license_trial_test.cpp
+    tests/license_user_lock_test.cpp
     tests/machine_id_test.cpp
     tests/offline_test.cpp
     tests/retired_test.cpp
