@@ -290,7 +290,7 @@ keygrant::HttpResponse FakeHttp::post(const std::string& url, const std::string&
   Handler handler;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    calls_.push_back(Call{action, json::parse(body), timeout});
+    calls_.push_back(Call{action, json::parse(body), timeout, url});
     if (const auto it = handlers_.find(action); it != handlers_.end()) handler = it->second;
   }
   changed_.notify_all();
@@ -320,6 +320,14 @@ int FakeHttp::count(const std::string& action) {
   int n = 0;
   for (const Call& call : calls_) n += call.action == action ? 1 : 0;
   return n;
+}
+
+std::string FakeHttp::urlOf(const std::string& action) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  for (const Call& call : calls_) {
+    if (call.action == action) return call.url;
+  }
+  return "";
 }
 
 json FakeHttp::bodyOf(const std::string& action) {
@@ -388,7 +396,7 @@ Harness::Harness(std::optional<StoredState> initial, HarnessOptions options)
   config.deviceName = options.deviceName;
   if (options.httpTimeout) config.httpTimeout = *options.httpTimeout;
   if (options.deviceHold) config.deviceHold = *options.deviceHold;
-  config.adapters = keygrant::Adapters{storage, registry, clock, fingerprint, http};
+  config.adapters = keygrant::Adapters{options.wrapStorage ? options.wrapStorage(storage) : storage, registry, clock, fingerprint, http};
   license_ = std::make_unique<keygrant::License>(config, timings);
 }
 

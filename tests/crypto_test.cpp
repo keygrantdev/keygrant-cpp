@@ -1,5 +1,7 @@
 // The lease's cryptography and claims, and the schema's edges: canonical base64url, the public key,
 // verification, and the entitlements claim read leniently.
+#include <limits>
+
 #include "crypto.hpp"
 #include "lease.hpp"
 #include "support.hpp"
@@ -261,16 +263,27 @@ TEST_F(Verify, ReadsEntitlementNumbersAsTheNearestDoubleAsJavaScriptDoes) {
   EXPECT_EQ(v.claims->ent.at("huge").number(), 1e21);
 }
 
-TEST_F(Verify, RefusesWholeAPayloadItsJsonReaderCannotReadALoneSurrogateOrANumberPastADouble) {
-  // As the README's parity list says: nlohmann/json refuses an escaped lone surrogate and a number
-  // past a double's range, so the lease is bad-claims here, where the reference keeps the
-  // entitlement. The signer writes neither. \x5c is a backslash: a JSON escape in the payload,
-  // never a C++ one.
+TEST_F(Verify, RefusesWholeAPayloadItsJsonReaderCannotReadALoneSurrogate) {
+  // As the README's parity list says: nlohmann/json refuses an escaped lone surrogate, so the lease is
+  // bad-claims here, where the reference keeps the entitlement. The signer writes none. \x5c is a backslash:
+  // a JSON escape in the payload, never a C++ one.
   EXPECT_EQ(verifyEntText("{\"edition\":\"\x5cud800\"}").reason, VerifyFailure::BadClaims);
   EXPECT_EQ(verifyEntText("{\"\x5cudc00edition\":\"pro\"}").reason, VerifyFailure::BadClaims);
-  EXPECT_EQ(verifyEntText(R"({"seats":1e400})").reason, VerifyFailure::BadClaims);
   // The same payloads with whole characters and a double's number read as usual.
   EXPECT_TRUE(verifyEntText("{\"edition\":\"\x5cud83c\x5cudfb5\",\"seats\":1e300}").valid);
+}
+
+TEST_F(Verify, ReadsANumberPastADoublesRangeAsAMemberOfNoValueAndRefusesNoPayloadForIt) {
+  // JSON.parse reads 1e400 as Infinity and goes on. Here the member it is the value of is read as absent, as a member
+  // of another shape is (the reference keeps an Infinity entitlement), and the lease is read all the same.
+  const VerifyResult v = verifyEntText(R"({"seats":1e400,"deficit":-1e400,"edition":"pro"})");
+  ASSERT_TRUE(v.valid);
+  EXPECT_EQ(v.claims->ent, (Entitlements{{"edition", "pro"}}));
+  // A number well inside the range is read as it is, and so is the largest double.
+  const VerifyResult inside = verifyEntText(R"({"seats":1e308,"top":1.7976931348623157e308})");
+  ASSERT_TRUE(inside.valid);
+  EXPECT_EQ(inside.claims->ent.at("seats").number(), 1e308);
+  EXPECT_EQ(inside.claims->ent.at("top").number(), std::numeric_limits<double>::max());
 }
 
 TEST_F(Verify, TakesEntitlementNamesAndTextsPastUffffWholeWrittenRawOrEscaped) {

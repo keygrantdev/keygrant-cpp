@@ -95,7 +95,7 @@ class LicenseAccess;
 struct Timings {
   /// How long past its HTTP bound a call may hold the next one waiting.
   std::chrono::milliseconds lockGrace{15'000};
-  /// How long a check status() makes on a valid lease may hold it up.
+  /// How long a check status() makes on a valid lease, a trial heal or a use() request may hold it up.
   std::chrono::milliseconds statusCheck{5'000};
   /// How long status() may spend reading who the device is.
   std::chrono::milliseconds machineId{2'000};
@@ -109,7 +109,7 @@ struct Timings {
 /**
  * Client-side licensing for desktop apps. Verifies signed JWT leases OFFLINE
  * and only contacts the server to activate, to renew a lease nearing its end or
- * past it, to tell it of a newer major, or to report a running trial's launch
+ * past it, to tell it of a newer major, to spend a metered use, or to report a running trial's launch
  * (at most once a day), so a transient outage never locks out a paying customer while the lease is live.
  * A trial's start only moves earlier, and a monotonic clock guard stops a
  * rewound clock resurrecting an expired lease.
@@ -117,7 +117,7 @@ struct Timings {
  * Every call blocks, and is safe to call from several threads: calls on one
  * License run one at a time, and a call that waited past the previous call's
  * HTTP bound plus 15 s runs READ-ONLY (it answers from what is stored, with no
- * ask and no write, and says `stalled`). Call it off the UI thread: a call that
+ * ask and no write, and says `stalled`; use() alone still asks, and saves nothing). Call it off the UI thread: a call that
  * asks the server can take up to the HTTP bound.
  *
  * Destroying a License while a call is stuck in an adapter, or while a
@@ -191,15 +191,42 @@ class License {
   void require(const std::string& code);
 
   /**
+   * Spend `n` uses (default 1) of the key's meter `meter`, before the work they count; do the work only when the result
+   * is `ok`.
+   *
+   * Online it is exact: the server takes `n` only while the meter has room for all of it (UseError::UsedUp, with `left`,
+   * otherwise). With no answer (no network, a timeout, a 5xx, a 429 or an answer the SDK cannot use) it spends from this
+   * device's offline allowance for the meter, never past what the device last heard is left (UseError::OfflineLimit),
+   * answers `offline`, and reports the spend with its next request (a check-in, a use or a deactivation). A spend the
+   * allowance would refuse asks the server first, whatever the last outage left behind, so a customer who is back online
+   * is not refused for it (once a minute while KeyGrant stays out of reach); one the allowance covers is not asked again
+   * for a minute after an outage, growing to an hour.
+   *
+   * Needs a key's lease that licenses this build here (UseError::NotLicensed otherwise, asking nothing); a device trial
+   * and an offline licence file have no meters. `n` from 1 to kMaxMeterUses (UseError::InvalidAmount otherwise) and a
+   * meter code of 1 to 32 UTF-16 units, matched exactly (UseError::NoMeter otherwise), both without asking anything. Two
+   * calls are two spends: the spend's id covers the SDK's own retries and reports, never an app that calls twice.
+   *
+   * Never throws: every outcome is in the result, behind a call that has not finished too (nothing is then saved: an
+   * offline spend is kept in memory and saved by the next call that can), and a state that cannot be read just now is
+   * UseError::Storage (a random source the platform cannot give, for the spend's id, is Storage too). The call blocks and runs to its bounded answer: a `use` request waits at most 5 seconds, or
+   * LicenseConfig::httpTimeout when that is shorter. Calls on one License run one at a time, this one among them. Call it
+   * off the UI thread.
+   */
+  UseResult use(const std::string& meter, std::int64_t n = 1);
+
+  /**
    * Release this device's activation and drop the local licence, keeping only
    * the trial evidence, the clock guard and a stored offline licence file
    * (removeLicenseFile() drops that). Answers whether the seat is now
    * free (`released`): true when KeyGrant answered the release with a 200, or
    * when no activation was held; false when it could not be asked or answered
    * anything else, and the seat may still be held. The local licence is
-   * dropped either way. Throws StalledError behind a call that has not
-   * finished (nothing released or dropped), and the storage adapter's
-   * exception when the state cannot be read or saved.
+   * dropped either way. The journal of unsynced metered spends goes with the
+   * release (and the device's fingerprints, so the server holds it to the seat's
+   * device) and is dropped with the licence, reported or not. Throws StalledError
+   * behind a call that has not finished (nothing released or dropped), and the
+   * storage adapter's exception when the state cannot be read or saved.
    */
   DeactivateResult deactivate();
 

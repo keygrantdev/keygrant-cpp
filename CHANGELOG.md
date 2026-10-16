@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.7.0
+
+- Metered uses: `License::use(meter, n = 1)` spends `n` uses of a meter the key's licence model counts (1,000
+  exports for good, 50 renders each billing period) and answers a `keygrant::UseResult` (`ok`, `left`, `offline`,
+  `error`, an optional `UseError`: `InvalidAmount`, `NoMeter`, `UsedUp` (with `left`), `OfflineLimit` (with `left`),
+  `NotLicensed`, `Storage`, or the server's verdict on the key, the build or the device: `Revoked`, `Upgrade`, `Outdated`,
+  `Device`). Online it is exact and atomic. When KeyGrant gives no answer (no network, a timeout, a 5xx, a 429) the
+  device spends from its offline allowance for the meter, never past what it last heard is left, and answers `ok` with
+  `offline` true; past the allowance it is `OfflineLimit`. A spend the allowance would refuse asks the server, whatever
+  the last outage left behind, once a minute while it stays out of reach; one it covers waits a minute after an outage,
+  doubling to an hour. It throws for no outcome (what no adapter can tell it, an adapter that threw, is `Storage`),
+  blocks and takes no cancellation, and its request waits at most 5 seconds (less when `httpTimeout` is shorter). `n`
+  is a `std::int64_t`: anything outside 1 to `kMaxMeterUses` (1,000,000,000) is `InvalidAmount`, asking nothing. A meter
+  never takes a licence away: nothing in `status()` reads one to decide whether the app is licensed. `to_string` gives
+  the words every KeyGrant SDK uses (`invalid-amount`, `used-up`, `offline-limit`, ...), and a `switch` over every
+  `UseError` has ten cases. The new types are in `<keygrant/meter.hpp>`, which `<keygrant/types.hpp>` includes.
+- `LicenseStatus::meters`, by meter code: `left` (the newest figure, the lease's or the last `use` answer's, net of
+  this device's unsynced spends), `total`, `offline` (this device's allowance), `unsynced` and `resets`. Offline, from the
+  lease and the stored figures; on a `Licensed` status from a key's lease that names meters only, empty on every other
+  status. `StoredState` has `spends` and `meterFigures`, so its layout changed (the 0.x SONAME carries the minor version,
+  so the library is `libkeygrant.so.0.7`).
+- The spends a device made with no answer are kept in the stored state (`StoredState::spends`, with the newest figures a
+  `use` answer gave in `meterFigures`), merged across processes as the rest of the state is, and reported with the next
+  validate (a check-in or renewal), `use` or `deactivate`, which now also names the device's fingerprints when it carries
+  a report. They are dropped only when the server says it recorded them; a device back online reports at its next
+  `status()`. A journal never fails a renewal or a deactivation. Entries not reported within 180 days are dropped, and at
+  most 64 are kept (no more than 16 of them the take-back of a spend whose answer was lost; a new one takes the oldest
+  one's place). A
+  spend the SDK could not save (a disk that refuses its writes) is kept in memory, counted in `left` and `unsynced`, and
+  reported once it has been saved. The state is read leniently: a journal that is not a list, or an entry of another
+  shape, is read as empty or left out.
+- A lease's `met` claim is read leniently, as `ent` is: a member that is not a well-formed meter (a figure missing,
+  negative, fractional, past 2^53 - 1 or out of a double's range) is dropped, never the lease. A number out of a double's
+  range (`1e400`) no longer fails the text it is in: before, a lease payload, a licence file or a server answer holding
+  one was refused whole (or read as no body at all); the member holding it is now read as absent. An entitlement holding
+  one is dropped, where it made the lease `bad-claims`.
+- A spend's id is 16 bytes from OpenSSL's random source, which the SDK links already: no new dependency.
+- The conformance vectors' twelve metered-uses groups are replayed (410 of their 412 vectors: the two that give `use` a
+  fraction and a text are JavaScript's only), with the captured request bodies, behaviour tests, and a seeded property
+  test of two processes over one state file (1,500 sequences).
+
 ## 0.6.0
 
 - User-locked keys: `License::activate(key, options)` and `License::importLicenseFile(content, options)`,

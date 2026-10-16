@@ -200,7 +200,7 @@ class WindowsRegistryStash final : public RegistryStash {
 /** Options for CurlHttp. */
 struct CurlHttpOptions {
   /// Sent as `User-Agent`.
-  std::string userAgent = "keygrant-cpp/0.6";
+  std::string userAgent = "keygrant-cpp/0.7";
   /// A body larger than this is no answer (a portal page, a hostile endpoint).
   std::size_t maxBodyBytes = 1024 * 1024;
   /// A CA bundle to verify TLS with, instead of the system's.

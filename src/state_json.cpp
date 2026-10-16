@@ -11,10 +11,11 @@ namespace detail {
 
 namespace {
 
-constexpr std::array<const char*, 20> kKnownFields = {
+constexpr std::array<const char*, 22> kKnownFields = {
     "key",          "activationId", "lease",        "trialStart",   "trialEndsAt",     "trialLease", "trialAt",
     "lastSeen",     "checkedMajor", "keptMajor",    "backoffSince", "backoffMs",       "refused",    "refusedMajor",
     "refusedFor",   "deviceKind",   "verdictAt",    "rev",          "trialReportedAt", "licenseFile",
+    "spends",       "meterFigures",
 };
 
 /**
@@ -89,7 +90,36 @@ bool holds(const StoredState& s, const std::string& name) {
   if (name == "rev") return s.rev.has_value();
   if (name == "trialReportedAt") return s.trialReportedAt.has_value();
   if (name == "licenseFile") return s.licenseFile.has_value();
+  // The journal and its figures are the device's own: a value this SDK cannot read is dropped, never kept to be
+  // written back, so they are always its own.
+  if (name == "spends" || name == "meterFigures") return true;
   return false;
+}
+
+/** A stored journal entry, or none when it is not one: an unknown member of a valid entry is not kept. */
+std::optional<SpendEntry> spendFrom(const json& value) {
+  if (!value.is_object()) return std::nullopt;
+  const auto id = stringField(value, "id");
+  const auto meter = stringField(value, "meter");
+  const auto kind = stringField(value, "kind");
+  const auto n = value.find("n");
+  const auto at = value.find("at");
+  if (!id || !meter || !kind || n == value.end() || at == value.end()) return std::nullopt;
+  const std::optional<std::int64_t> count = countOf(*n);
+  const std::optional<std::int64_t> opened = figureOf(*at);
+  const std::optional<SpendKind> spendKind = spendKindFromString(*kind);
+  if (!count || !opened || !spendKind) return std::nullopt;
+  return SpendEntry{*id, *meter, *count, *opened, *spendKind};
+}
+
+/** A stored figure, or none when it is not one. */
+std::optional<MeterFigure> figureFrom(const json& value) {
+  const std::optional<std::int64_t> left = figureMember(value, "left");
+  const std::optional<std::int64_t> total = figureMember(value, "total");
+  const std::optional<std::int64_t> offline = figureMember(value, "offline");
+  const std::optional<std::int64_t> at = figureMember(value, "at");
+  if (!left || !total || !offline || !at) return std::nullopt;
+  return MeterFigure{*left, *total, *offline, trueMember(value, "resets"), *at};
 }
 
 }  // namespace
@@ -116,6 +146,20 @@ ordered_json stateToJson(const StoredState& s) {
   put(out, "rev", s.rev);
   put(out, "trialReportedAt", s.trialReportedAt);
   put(out, "licenseFile", s.licenseFile);
+  if (!s.spends.empty()) {
+    ordered_json journal = ordered_json::array();
+    for (const SpendEntry& e : s.spends) {
+      journal.push_back({{"id", e.id}, {"meter", e.meter}, {"n", e.n}, {"at", e.at}, {"kind", to_string(e.kind)}});
+    }
+    out["spends"] = std::move(journal);
+  }
+  if (!s.meterFigures.empty()) {
+    ordered_json figures = ordered_json::object();
+    for (const auto& [code, f] : s.meterFigures) {
+      figures[code] = {{"left", f.left}, {"total", f.total}, {"offline", f.offline}, {"resets", f.resets}, {"at", f.at}};
+    }
+    out["meterFigures"] = std::move(figures);
+  }
   // Kept as written: fields this SDK does not know, and values of known ones
   // it could not read (a newer SDK's), unless it now holds a value of its own.
   // A retired name is never written.
@@ -157,6 +201,17 @@ StoredState stateFromJson(const json& object) {
   s.rev = numberField(object, "rev");
   s.trialReportedAt = numberField(object, "trialReportedAt");
   s.licenseFile = stringField(object, "licenseFile");
+  // Read leniently: an entry or a figure of another shape is left out, and an empty journal is the field absent.
+  if (const auto it = object.find("spends"); it != object.end() && it->is_array()) {
+    for (const json& entry : *it) {
+      if (std::optional<SpendEntry> spend = spendFrom(entry)) s.spends.push_back(std::move(*spend));
+    }
+  }
+  if (const auto it = object.find("meterFigures"); it != object.end() && it->is_object()) {
+    for (const auto& [code, member] : it->items()) {
+      if (std::optional<MeterFigure> figure = figureFrom(member)) s.meterFigures.insert_or_assign(code, *figure);
+    }
+  }
   // A field it does not know, or a known one whose value it cannot read (a
   // newer SDK's refusal or device kind, say), is kept to be written back.
   for (const auto& [name, value] : object.items()) {

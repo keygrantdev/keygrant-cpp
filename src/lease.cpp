@@ -63,6 +63,29 @@ json entitlementsJson(const std::map<std::string, Entitlement>& entitlements) {
   return out;
 }
 
+Meters metersOf(const json& raw) {
+  Meters out;
+  if (!raw.is_object()) return out;
+  for (const auto& [name, member] : raw.items()) {
+    if (!member.is_object()) continue;
+    const std::optional<std::int64_t> left = figureMember(member, "left");
+    const std::optional<std::int64_t> total = figureMember(member, "total");
+    const std::optional<std::int64_t> offline = figureMember(member, "offline");
+    if (!left || !total || !offline) continue;
+    // `resets` is true only for JSON true: a text, a number or null is false.
+    out.insert_or_assign(sanitizeUtf8(name), BaseFigure{*left, *total, *offline, trueMember(member, "resets")});
+  }
+  return out;
+}
+
+json metersJson(const Meters& meters) {
+  json out = json::object();
+  for (const auto& [code, figure] : meters) {
+    out[code] = {{"left", figure.left}, {"total", figure.total}, {"offline", figure.offline}, {"resets", figure.resets}};
+  }
+  return out;
+}
+
 const char* to_string(VerifyFailure failure) noexcept {
   switch (failure) {
     case VerifyFailure::Malformed: return "malformed";
@@ -111,6 +134,8 @@ std::optional<LeaseClaims> parseClaims(const json& payload) {
   }
   // Read leniently, never refused: absent or malformed is none (entitlementsOf).
   if (const json* ent = field(payload, "ent")) c.ent = entitlementsOf(*ent);
+  // Read leniently too, never refused: a claim that is not an object is no meters (metersOf).
+  if (const json* met = field(payload, "met")) c.met = metersOf(*met);
   if (!integer(field(payload, "iat"), false, c.iat)) return std::nullopt;
   if (!integer(field(payload, "exp"), false, c.exp)) return std::nullopt;
   if (const json* grace = field(payload, "grace")) {
@@ -138,6 +163,7 @@ json claimsJson(const LeaseClaims& c) {
   if (c.minMajor) out["minMajor"] = *c.minMajor;
   if (c.upgradeUntil) out["upgradeUntil"] = *c.upgradeUntil;
   out["ent"] = entitlementsJson(c.ent);
+  if (c.met) out["met"] = metersJson(*c.met);
   out["iat"] = c.iat;
   out["exp"] = c.exp;
   if (c.grace) out["grace"] = *c.grace;

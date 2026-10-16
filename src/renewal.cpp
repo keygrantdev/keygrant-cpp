@@ -1,5 +1,7 @@
 #include "renewal.hpp"
 
+#include "meters.hpp"
+
 namespace keygrant::detail {
 
 namespace {
@@ -86,7 +88,7 @@ RenewalOutcome renewalOutcome(const RenewalInput& input) {
 bool asksOnValidLease(const LeaseClaims& claims, const StoredState& state, std::int64_t major, std::int64_t now,
                       std::int64_t clockNow) {
   const bool newMajor = claims.major >= kOpenMajor && major > state.checkedMajor.value_or(0);
-  const bool due = newMajor || renewsEarly(claims, now);
+  const bool due = newMajor || renewsEarly(claims, now) || journalAsks(state.spends, now);
   return due && askDue(state, clockNow, false);
 }
 

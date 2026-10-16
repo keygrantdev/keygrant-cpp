@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(keygrant
-  VERSION 0.6.0
+  VERSION 0.7.0
   DESCRIPTION "KeyGrant licensing SDK for native desktop apps"
   LANGUAGES CXX)
 
@@ -38,8 +38,10 @@ add_library(keygrant
   src/crypto.cpp
   src/device.cpp
   src/engine.cpp
+  src/engine_journal.cpp
   src/fingerprinter.cpp
   src/http_curl.cpp
+  src/journal.cpp
   src/json_util.cpp
   src/lease.cpp
   src/license.cpp
@@ -47,8 +49,12 @@ add_library(keygrant
   src/license_files.cpp
   src/machine_id.cpp
   src/machine_id_system.cpp
+  src/meter_answers.cpp
+  src/meter_types.cpp
+  src/meters.cpp
   src/offline.cpp
   src/renewal.cpp
+  src/spend.cpp
   src/state_json.cpp
   src/storage_file.cpp
   src/storage_fs.cpp
@@ -64,7 +70,7 @@ add_library(keygrant::keygrant ALIAS keygrant)
 include(GNUInstallDirs)
 
 # A 0.x minor may change the library's ABI, so while the major is 0 the shared library's SONAME
-# carries the minor too (libkeygrant.so.0.6); from 1.0 on, the major alone.
+# carries the minor too (libkeygrant.so.0.7); from 1.0 on, the major alone.
 if(PROJECT_VERSION_MAJOR EQUAL 0)
   set(KEYGRANT_SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
 else()
@@ -125,6 +131,7 @@ if(KEYGRANT_BUILD_TESTS)
     tests/conformance_files_test.cpp
     tests/conformance_keys_test.cpp
     tests/conformance_later_test.cpp
+    tests/conformance_meters_test.cpp
     tests/conformance_support.cpp
     tests/conformance_test.cpp
     tests/conformance_user_lock_test.cpp
@@ -144,13 +151,27 @@ if(KEYGRANT_BUILD_TESTS)
     tests/license_trial_test.cpp
     tests/license_user_lock_test.cpp
     tests/machine_id_test.cpp
+    tests/meter_journal_test.cpp
+    tests/meter_reports_test.cpp
+    tests/meter_rules_test.cpp
+    tests/meter_state_test.cpp
+    tests/meter_support.cpp
     tests/offline_test.cpp
+    tests/property/property_case.cpp
+    tests/property/property_net.cpp
+    tests/property/property_server.cpp
+    tests/property/property_world.cpp
     tests/retired_test.cpp
     tests/stash_test.cpp
     tests/state_test.cpp
     tests/storage_engine_test.cpp
     tests/storage_test.cpp
     tests/support.cpp
+    tests/use_held_test.cpp
+    tests/use_offline_test.cpp
+    tests/use_online_test.cpp
+    tests/use_process_test.cpp
+    tests/use_property_test.cpp
     tests/wire_test.cpp)
   target_include_directories(keygrant_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR}/tests)
   target_link_libraries(keygrant_tests PRIVATE

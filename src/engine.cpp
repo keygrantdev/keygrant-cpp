@@ -14,6 +14,13 @@ namespace keygrant::detail {
 
 namespace {
 
+/** The journal change an answer's confirmations make, about the activation it was asked for: none when it named none. */
+std::vector<JournalOp> confirmations(const StoredState& state, const std::optional<Reply>& response) {
+  std::vector<Confirmed> entries = spendsConfirmed(response ? &*response : nullptr);
+  if (entries.empty() || !state.activationId) return {};
+  return {JournalOp::confirmedOf(*state.activationId, std::move(entries))};
+}
+
 /** The API base, without the one trailing slash the reference drops. */
 std::string checkedBase(const std::string& apiBaseUrl) {
   const std::string lower = asciiLower(apiBaseUrl);
@@ -177,23 +184,6 @@ std::optional<DeviceKind> Engine::installKind(std::optional<DeviceKind> stored) 
   return deviceHold_ ? stored : std::nullopt;
 }
 
-StoredState Engine::load(bool readOnly) { return a_.storage->read(readOnly).value_or(StoredState{}); }
-
-/**
- * Persist a patch onto the state as it is stored NOW, by what it is based on,
- * advancing the clock guard unless it is being brought back on the server's
- * evidence (`guard`). Through the storage's update() when it has one.
- */
-void Engine::save(const StatePatch& patch, std::optional<std::int64_t> guard, const Basis& basis) {
-  const std::function<StoredState(const StoredState&)> merge = [&](const StoredState& latest) {
-    StoredState next = merged(latest, patch, basis);
-    next.lastSeen = savedLastSeen(latest.lastSeen, clockNow(), guard);
-    return next;
-  };
-  if (a_.storage->update(merge)) return;
-  a_.storage->write(merge(load()));
-}
-
 /** A save for status() and startTrial(), whose failure fails nothing. Whether it was saved. */
 bool Engine::saveBestEffort(const StatePatch& patch, std::optional<std::int64_t> guard, const Basis& basis) {
   try {
@@ -235,8 +225,8 @@ std::int64_t Engine::serverNow(const std::string& lease, const std::string& key,
   return *corrected;
 }
 
-std::optional<LicenseStatus> Engine::tryRenew(const StoredState& state, std::optional<Milliseconds> timeout) {
-  const Renewal renewal = renew(state, timeout);
+std::optional<LicenseStatus> Engine::tryRenew(const View& view, std::optional<Milliseconds> timeout) {
+  const Renewal renewal = renew(view, timeout);
   return renewal.answered ? renewal.status : std::nullopt;
 }
 
@@ -247,8 +237,18 @@ std::optional<LicenseStatus> Engine::tryRenew(const StoredState& state, std::opt
  * ask that came back without a lease starts the wait before the SDK asks again
  * on its own (askDue): kRetryUnansweredMs when nothing answered at all,
  * kAskAgainMs when the server did.
+ *
+ * The request carries the journal of this device's unsynced spends (`spends`),
+ * and the entries the answer names as recorded are dropped from it with the rest
+ * of what the answer saves; a save that fails keeps that in memory (saveOps), and
+ * the entries are reported again, which the server counts once. An answer that
+ * confirms none of what the request reported (the server could not record it)
+ * starts the wait of an answer without a lease, so a journal the server will not
+ * take is not offered at every status(). A licensed answer's status shows the
+ * key's meters.
  */
-Renewal Engine::renew(const StoredState& state, std::optional<Milliseconds> timeout) {
+Renewal Engine::renew(const View& view, std::optional<Milliseconds> timeout) {
+  const StoredState& state = view.state;
   // The wait runs on the device clock, as askDue reads it; the answer is
   // stamped by the guarded one, which a clock put back does not move back, so
   // an answer asked for later still reads as later to another process.
@@ -258,8 +258,11 @@ Renewal Engine::renew(const StoredState& state, std::optional<Milliseconds> time
   // A machine id read here keys this install from now on (deviceKind):
   // written with whatever this ask writes, as the seat is re-keyed by it.
   const Device here = device(timings_.machineId, state.deviceKind);
-  std::optional<Reply> response = post("validate", validateBody(state, here), timeout);
+  const std::optional<ordered_json> reports = spendsReported(reportable(view));
+  std::optional<Reply> response = post("validate", validateBody(state, here, reports), timeout);
   const Judged judged = judgeFresh(state, response);
+  const std::vector<JournalOp> ops = confirmations(state, response);
+  const bool heard = response && !noAnswer(response->status);
   RenewalInput input;
   // Moved, never copied (see Reply).
   input.response = std::move(response);
@@ -272,9 +275,23 @@ Renewal Engine::renew(const StoredState& state, std::optional<Milliseconds> time
   input.kind = here.kind;
   input.ownClaim = here.ownClaim;
   const RenewalOutcome outcome = renewalOutcome(input);
-  // Saved as the answer to its ask; a save that fails leaves the answer standing (saveBestEffort).
-  saveBestEffort(outcome.patch, std::nullopt, asked);
-  return outcome.answered ? Renewal{true, outcome.status} : Renewal{};
+  StatePatch patch = outcome.patch;
+  if (reports && heard && ops.empty()) {
+    patch.backoffSince = Change<std::int64_t>::set(askedAt);
+    patch.backoffMs = Change<std::int64_t>::set(kAskAgainMs);
+  }
+  // Saved as the answer to its ask; a save that fails leaves the answer standing, and keeps what it confirmed in memory.
+  saveOps(state, patch, asked, ops);
+  return outcome.answered ? Renewal{true, metered(outcome.status, judged.check, state, ops)} : Renewal{};
+}
+
+/** A licensed answer's status with the meters of the lease that brought it, net of the journal as the answer left it. */
+std::optional<LicenseStatus> Engine::metered(const std::optional<LicenseStatus>& status,
+                                             const std::optional<LeaseCheck>& check, const StoredState& state,
+                                             const std::vector<JournalOp>& ops) {
+  if (!status || !check || !check->ok || !check->claims) return status;
+  const StoredState landed = landJournal(state, ops, guardedNow(clockNow(), state.lastSeen)).state;
+  return meteredStatus(*status, *check->claims, landed);
 }
 
 /**
@@ -310,18 +327,27 @@ Engine::Judged Engine::judged(const std::string& lease, const std::string& key, 
 }
 
 /**
- * A validate's body: with every fingerprint this device answers to when it
- * can tell, so the server refuses a licence file copied from another machine;
- * with none when it cannot, so a slow read never costs a renewal.
+ * What a validate and a use both send for the server's device check: with every
+ * fingerprint this device answers to when it can tell, so the server refuses a
+ * licence file copied from another machine; with none when it cannot, so a slow
+ * read never costs a renewal.
  */
-ordered_json Engine::validateBody(const StoredState& state, const Device& here) const {
+ordered_json Engine::deviceBody(const StoredState& state, const Device& here) const {
   ordered_json body = ordered_json::object();
   if (state.key) body["key"] = *state.key;
   if (state.activationId) body["activationId"] = *state.activationId;
   body["major"] = major_;
-  if (state.keptMajor) body["keptMajor"] = *state.keptMajor;
   if (here.canTell) body["fingerprints"] = here.fingerprints;
   if (here.canTell && here.kind) body["fingerprintKind"] = to_string(*here.kind);
+  return body;
+}
+
+/** A validate's body: the device check, the kept major, the journal's report when there is one, and the key ids. */
+ordered_json Engine::validateBody(const StoredState& state, const Device& here,
+                                  const std::optional<ordered_json>& reports) const {
+  ordered_json body = deviceBody(state, here);
+  if (state.keptMajor) body["keptMajor"] = *state.keptMajor;
+  if (reports) body["spends"] = *reports;
   body["kids"] = kidsJson();
   return body;
 }

@@ -146,10 +146,10 @@ std::optional<LicenseStatus> Engine::healTrial(const StoredState& state, bool fo
 }
 
 /** The stored state for a status, with a trial this process could not save; none when it cannot be read. */
-std::optional<StoredState> Engine::loadForStatus(bool readOnly) {
-  std::optional<StoredState> state;
+std::optional<View> Engine::loadForStatus(bool readOnly) {
+  std::optional<View> state;
   try {
-    state = load(readOnly);
+    state = view(readOnly);
   } catch (...) {
     return std::nullopt;
   }
@@ -159,7 +159,7 @@ std::optional<StoredState> Engine::loadForStatus(bool readOnly) {
     unsaved = unsaved_;
   }
   // As a save would merge it: a newer trial answer stored since wins.
-  if (unsaved) return merged(*state, unsaved->patch, unsaved->basis);
+  if (unsaved) return state->with(merged(state->state, unsaved->patch, unsaved->basis));
   return state;
 }
 

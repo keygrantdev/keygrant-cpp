@@ -31,8 +31,26 @@ std::optional<std::int64_t> wholeNumber(const json& value);
 std::optional<std::int64_t> anyNumber(const json& value);
 
 /**
+ * A figure of a meter: a JSON number that is a non-negative whole number of at most 2^53 - 1, however it is written
+ * (4.0 is 4, 1e1 is 10, -0 is 0). A fraction, a negative, a number out of a double's range, one past 2^53 - 1, or
+ * anything that is not a number is none: unlike wholeNumber it saturates nothing.
+ */
+std::optional<std::int64_t> figureOf(const json& value);
+
+/// A count: a figure of at least 1.
+std::optional<std::int64_t> countOf(const json& value);
+
+/// The member `name` of `value` read as a figure: none when `value` is no object, the member is missing or is no figure.
+std::optional<std::int64_t> figureMember(const json& value, const char* name);
+
+/// Whether the member `name` of `value` is JSON true: a text, a number, null, a missing member and a non-object are not.
+bool trueMember(const json& value, const char* name);
+
+/**
  * A body as JSON.parse reads the text a server sent (UTF-8 decoded, a BOM
- * dropped); a discarded value when it is not JSON. Never throws.
+ * dropped, a number out of a double's range, which JSON.parse reads as Infinity, read as null: the member it is the
+ * value of is read as absent, and the rest of the text is read all the same); a discarded value when it is not JSON.
+ * Never throws.
  */
 json parseJsonText(std::string_view text);
 

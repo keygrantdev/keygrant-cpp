@@ -14,6 +14,29 @@
 
 namespace keygrant::detail {
 
+/**
+ * A meter's figures as a lease signs them or an answer gives them, without the time of the answer: the base of what a
+ * status shows.
+ */
+struct BaseFigure {
+  /// What the key had left when it was signed.
+  std::int64_t left = 0;
+  /// The uses the key holds.
+  std::int64_t total = 0;
+  /// The allowance each of its devices may spend with no answer.
+  std::int64_t offline = 0;
+  /// Whether the meter comes back each billing period.
+  bool resets = false;
+
+  bool operator==(const BaseFigure& other) const {
+    return left == other.left && total == other.total && offline == other.offline && resets == other.resets;
+  }
+  bool operator!=(const BaseFigure& other) const { return !(*this == other); }
+};
+
+/// A key's meters by code, as a lease signs them.
+using Meters = std::map<std::string, BaseFigure>;
+
 /** The claims, as the reference's schema reads them (times in seconds). */
 struct LeaseClaims {
   std::string sub;
@@ -29,6 +52,9 @@ struct LeaseClaims {
   std::optional<std::int64_t> upgradeUntil;
   /// Entitlements, read leniently (entitlementsOf); none when absent or malformed.
   std::map<std::string, Entitlement> ent;
+  /// The key's meters (`met`), read leniently (metersOf); none when the lease has no such claim, and an empty map for
+  /// a claim that is not an object.
+  std::optional<Meters> met;
   std::int64_t iat = 0;
   std::int64_t exp = 0;
   std::optional<bool> grace;
@@ -61,8 +87,20 @@ std::map<std::string, Entitlement> entitlementsOf(const json& raw);
 json entitlementsJson(const std::map<std::string, Entitlement>& entitlements);
 
 /**
+ * `met`, or the `meters` of a `use` answer, as a verifier reads it: the members that are objects whose `left`, `total`
+ * and `offline` are each a figure (figureOf), `resets` true only for JSON true; every other member dropped, never the
+ * lease, the answer, or the meters beside it; and no meters at all from anything but an object. Names are kept as they
+ * are, `__proto__` included, and a meter's other members are ignored. The server's caps (how many meters, how large a
+ * figure, `left` at most `total`) are not enforced: the signature is the server's word.
+ */
+Meters metersOf(const json& raw);
+
+/// Meters as the vectors write them: `resets` always there.
+json metersJson(const Meters& meters);
+
+/**
  * The claims of a payload, checked as the server's claims schema checks them: none when any is
- * missing or wrong. Unknown claims are ignored, and `ent` is read leniently (entitlementsOf).
+ * missing or wrong. Unknown claims are ignored, and `ent` and `met` are read leniently (entitlementsOf, metersOf).
  */
 std::optional<LeaseClaims> parseClaims(const json& payload);
 

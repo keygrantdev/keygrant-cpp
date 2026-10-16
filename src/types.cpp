@@ -125,7 +125,7 @@ std::ostream& operator<<(std::ostream& out, const Entitlement& entitlement) {
 bool LicenseStatus::operator==(const LicenseStatus& other) const {
   return state == other.state && reason == other.reason && key == other.key && trialDaysLeft == other.trialDaysLeft &&
          trialEndsAt == other.trialEndsAt && test == other.test && entitlements == other.entitlements &&
-         stalled == other.stalled && source == other.source && licensedTo == other.licensedTo;
+         meters == other.meters && stalled == other.stalled && source == other.source && licensedTo == other.licensedTo;
 }
 
 std::ostream& operator<<(std::ostream& out, const LicenseStatus& status) {
@@ -140,6 +140,17 @@ std::ostream& operator<<(std::ostream& out, const LicenseStatus& status) {
     const char* separator = " ";
     for (const auto& [name, value] : status.entitlements) {
       out << separator << detail::dumpJson(detail::json(name)) << ": " << value;
+      separator = ", ";
+    }
+    out << " }";
+  }
+  if (!status.meters.empty()) {
+    out << ", meters: {";
+    const char* separator = " ";
+    for (const auto& [code, meter] : status.meters) {
+      out << separator << detail::dumpJson(detail::json(code)) << ": { left: " << meter.left << ", total: " << meter.total
+          << ", offline: " << meter.offline << ", unsynced: " << meter.unsynced
+          << ", resets: " << (meter.resets ? "true" : "false") << " }";
       separator = ", ";
     }
     out << " }";
@@ -181,8 +192,8 @@ bool StoredState::operator==(const StoredState& other) const {
          keptMajor == other.keptMajor && backoffSince == other.backoffSince && backoffMs == other.backoffMs &&
          refused == other.refused && refusedMajor == other.refusedMajor && refusedFor == other.refusedFor &&
          deviceKind == other.deviceKind && verdictAt == other.verdictAt && rev == other.rev &&
-         trialReportedAt == other.trialReportedAt && licenseFile == other.licenseFile &&
-         otherFields == other.otherFields;
+         trialReportedAt == other.trialReportedAt && licenseFile == other.licenseFile && spends == other.spends &&
+         meterFigures == other.meterFigures && otherFields == other.otherFields;
 }
 
 std::ostream& operator<<(std::ostream& out, const StoredState& state) { return out << serializeState(state); }

@@ -11,6 +11,7 @@
 #include "conformance.hpp"
 #include "crypto.hpp"
 #include "device.hpp"
+#include "meter_support.hpp"
 #include "lease.hpp"
 #include "machine_id.hpp"
 #include "offline.hpp"
@@ -27,7 +28,7 @@ using keygrant::Refusal;
 
 TEST(Conformance, EveryGroupInTheFileIsReplayedHere) {
   // A group added to the file must be added here too, or this fails.
-  const std::set<std::string> replayed = {
+  std::set<std::string> replayed = {
       "leases",       "trials",          "fingerprintClaims", "fingerprints",   "machineFingerprints",
       "hostFingerprints", "kept",        "renew",             "asks",           "standing",
       "trialStatuses", "refusalPatches", "leasePatches",      "keyedBy",        "merges",
@@ -43,6 +44,8 @@ TEST(Conformance, EveryGroupInTheFileIsReplayedHere) {
       "licenseFileContainers", "licenseFiles", "filesAsLeases",
       // The user-lock groups: conformance_user_lock_test.cpp.
       "typedFor",     "userLockErrors"};
+  // The metered-uses groups close the file: conformance_meters_test.cpp.
+  replayed.insert(meteredGroups().begin(), meteredGroups().end());
   std::set<std::string> inFile;
   for (const auto& [name, value] : vectors().items()) {
     if (value.is_array() && !value.empty() && value.front().is_object()) inFile.insert(name);
@@ -57,6 +60,10 @@ TEST(Conformance, TheConstantsAreTheReferences) {
   for (const auto& [name, value] : c.items()) {
     (void)value;
     inFile.insert(name);
+  }
+  // The metered-uses constants close this block, as their groups close the file (conformance_meters_test.cpp checks them).
+  for (const char* name : {"MAX_METER_USES", "MAX_PENDING_SPENDS", "MAX_PENDING_VOIDS", "PENDING_MAX_MS", "USE_TIMEOUT_MS"}) {
+    inFile.erase(name);
   }
   EXPECT_EQ(inFile, (std::set<std::string>{"OPEN_MAJOR", "ASK_AGAIN_MS", "RETRY_UNANSWERED_MS", "RENEW_WITHIN_MS",
                                             "CLOCK_TOLERANCE_MS", "STATUS_CHECK_TIMEOUT_MS", "DEFAULT_HTTP_TIMEOUT_MS",

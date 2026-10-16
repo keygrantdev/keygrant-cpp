@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "keygrant/entitlement.hpp"
+#include "keygrant/meter.hpp"
 
 namespace keygrant {
 
@@ -176,6 +177,13 @@ struct LicenseStatus {
   /// Who the stored licence file is licensed to, on a file status that is Licensed, or Invalid with
   /// RevokedFile, Upgrade or Outdated; none otherwise.
   std::optional<LicensedTo> licensedTo;
+  /**
+   * The key's meters by code, on a `Licensed` status from a key's lease (a stalled one included): each meter this
+   * device holds figures for, with what is left net of the spends it made and has not reported (License::use()).
+   * Empty on every other status, and when the key has no meter. The status's own copy. A meter never decides whether
+   * the app is licensed: one that is used up refuses spends, never the licence.
+   */
+  std::map<std::string, MeterStatus> meters;
 
   /// Every member alike, the entitlements by content (each name and value; numbers as numbers).
   bool operator==(const LicenseStatus& other) const;
@@ -260,6 +268,18 @@ struct StoredState {
   /// The stored offline licence file's token, as importLicenseFile stored it; verified again on every status.
   std::optional<std::string> licenseFile;
   /**
+   * The journal of this device's spends KeyGrant has not confirmed yet, oldest first, about the stored activation:
+   * reported with the next check-in, use or deactivation, and dropped only when the server confirms it. At most 64
+   * entries (but for the spends the customer was told were made while only memory could hold them); empty is the
+   * field absent. An entry of another shape is read as none.
+   */
+  std::vector<SpendEntry> spends;
+  /**
+   * The newest figures a `use` answer gave for each meter, by code, about the stored activation: newer than the
+   * stored lease's own until the lease is renewed. Empty is the field absent. A member of another shape is read as none.
+   */
+  std::map<std::string, MeterFigure> meterFigures;
+  /**
    * What this SDK cannot read, as raw JSON text by name: fields it does not
    * know (a newer SDK's), and values of known fields it cannot read (a newer
    * SDK's refusal or device kind, say; the field itself is then absent above).
@@ -281,7 +301,8 @@ std::string serializeState(const StoredState& state);
  * A state read back from its JSON. Throws std::invalid_argument when the text
  * is not JSON; std::nullopt for JSON that is not an object (`null`). A known
  * field of the wrong type, or with a value this SDK does not know, is read as
- * absent, and kept as written (otherFields).
+ * absent, and kept as written (otherFields); the journal's `spends` and `meterFigures` are the exception: an entry
+ * or a figure of another shape is left out.
  */
 std::optional<StoredState> parseState(std::string_view json);
 

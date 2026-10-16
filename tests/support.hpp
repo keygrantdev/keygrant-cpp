@@ -252,6 +252,8 @@ class FakeHttp final : public keygrant::HttpAdapter {
   int count(const std::string& action);
   /// The body of the first `action` call (a test failure when there was none).
   json bodyOf(const std::string& action);
+  /// The URL the first request for `action` went to ("" when there was none).
+  std::string urlOf(const std::string& action);
   /// The body of every `action` call, in order.
   std::vector<json> bodiesOf(const std::string& action);
   std::vector<std::string> actions();
@@ -270,6 +272,7 @@ class FakeHttp final : public keygrant::HttpAdapter {
     std::string action;
     json body;
     Millis timeout;
+    std::string url;
   };
   std::mutex mutex_;
   std::condition_variable changed_;
@@ -286,6 +289,8 @@ struct HarnessOptions {
   std::shared_ptr<keygrant::Fingerprinter> fingerprint;
   std::optional<bool> deviceHold;
   keygrant::detail::Timings timings{};
+  /// The storage the License is given, made over the harness's in-memory one (default: that one itself).
+  std::function<std::shared_ptr<keygrant::StorageAdapter>(std::shared_ptr<MemoryStorage>)> wrapStorage;
 };
 
 /** Short timings, for the tests that wait out a bound. */

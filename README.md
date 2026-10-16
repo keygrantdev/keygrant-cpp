@@ -2,8 +2,8 @@
 
 Licensing for native desktop apps (Qt, wxWidgets, JUCE, plain Win32, Cocoa or GTK): a licence is proven to the app by a
 signed lease (a JWT, EdDSA over Ed25519) that the SDK verifies **offline** against your product's public key. The app
-only talks to KeyGrant to activate, to renew a lease near or past its end, to report a newer major version, or to
-report a running trial's launch (at most once a day).
+only talks to KeyGrant to activate, to renew a lease near or past its end, to report a newer major version, to
+spend a metered use, or to report a running trial's launch (at most once a day).
 
 The rule every line of it serves: **licensing failure fails in favour of the
 paying customer.** An outage, no network, a timeout, a 5xx, a 429, an ambiguous
@@ -14,7 +14,7 @@ lease's own end does.
 
 This is a port of the Electron SDK (`@keygrant/electron`, the reference), held to the same behaviour by every answer in
 `conformance/vectors.json` (every vector is replayed by the suite but the `majors` fractions, which no `std::int64_t`
-major can hold). The full guide is at https://keygrant.dev/docs.
+major can hold, and the two metered `useAmounts` that give `use` a fraction and a text, which no `std::int64_t` can). The full guide is at https://keygrant.dev/docs.
 
 - C++17, one CMake target: `keygrant::keygrant` (static by default; `BUILD_SHARED_LIBS` honoured).
 - Depends on OpenSSL 3 (Ed25519, SHA-256), libcurl (HTTP) and nlohmann/json (private: never in a public header).
@@ -29,7 +29,7 @@ major can hold). The full guide is at https://keygrant.dev/docs.
 include(FetchContent)
 FetchContent_Declare(keygrant
   GIT_REPOSITORY https://github.com/keygrantdev/keygrant-cpp.git
-  GIT_TAG        0.6.0)
+  GIT_TAG        0.7.0)
 FetchContent_MakeAvailable(keygrant)
 
 target_link_libraries(my_app PRIVATE keygrant::keygrant)
@@ -39,7 +39,7 @@ or, with the repository vendored, `add_subdirectory(third_party/keygrant)`. Buil
 SDK builds no tests and never adds `-Werror` to your build.
 
 OpenSSL 3, libcurl and nlohmann/json must be findable by `find_package`. Installed (`cmake --install`), the SDK
-is a package: `find_package(keygrant 0.6 REQUIRED)` (a static install finds OpenSSL and CURL again for you).
+is a package: `find_package(keygrant 0.7 REQUIRED)` (a static install finds OpenSSL and CURL again for you).
 
 ### vcpkg (Windows, macOS)
 
@@ -108,7 +108,7 @@ come from any number of threads (below).
 
 | `state` | `reason` | What to do |
 |---|---|---|
-| `Licensed` | | Run. `test` is true on a test licence: refuse it in a release build if you want to. `entitlements` is what it grants (below). With `source == LicenseSource::File`, an offline licence file licenses it: show `licensedTo` (below). |
+| `Licensed` | | Run. `test` is true on a test licence: refuse it in a release build if you want to. `entitlements` is what it grants (below); `meters` is what it counts ([below](#metered-uses-counting-what-a-key-may-do)). With `source == LicenseSource::File`, an offline licence file licenses it: show `licensedTo` (below). |
 | `Trial` | | Run. `trialEndsAt` (ms) is the end the trial's lease was signed to, and `trialDaysLeft` counts down to it. `entitlements` is what the trial's lease grants. |
 | `Expired` | `Offline` | The lease ran out and the server could not be reached: show "connect to renew". |
 | `Expired` | `Trial` | The trial is over: its signed trial lease is no longer valid. |
@@ -148,6 +148,9 @@ named for parity and never returned.
   one, or a device refusal that stands for this one) is dropped here without asking KeyGrant to release it, which
   would lock that PC out; `released` is then `true`, as this device held no seat. Throws `keygrant::StalledError`
   behind a stuck call (nothing released or dropped), and the storage's exception.
+- `use(meter, n = 1)`: spends `n` uses of a meter the key's licence model counts, exact online and from an offline
+  allowance with no answer, and answers a `UseResult` (`ok`, `left`, `offline`, `error`, a `UseError`). It never throws
+  ([below](#metered-uses-counting-what-a-key-may-do)).
 - `startTrial()`: never throws. A trial runs only while its trial lease (signed by KeyGrant to the trial's own end)
   is valid: the end stored beside it is unsigned, and editing it extends nothing. An answer whose trial lease this
   build cannot verify (signed with a key the product rotated to ahead of this build, say) never replaces a stored one
@@ -311,6 +314,66 @@ the server nothing and so costing the key none of its wrong tries; the key is ju
 code. A key that is not locked ignores both once they reach the server. `importLicenseFile(content, options)` passes
 them on to a key file's key. `deactivate()`, `refresh()` and `startTrial()` take neither.
 
+### Metered uses: counting what a key may do
+
+A licence model can count uses of what it sells: 1,000 exports for good, or 50 renders each billing period. The app
+spends them with `use(meter, n)`, before the work they count, and does the work only when the spend is `ok`:
+
+```cpp
+const keygrant::UseResult spent = license.use("exports");   // use("exports", 40) spends forty at once, whole or none
+if (spent.ok) {
+  runExport();   // spent.left: what is left now, net of this device's unsynced spends
+} else {
+  switch (*spent.error) {
+    // The server's word: fewer left than asked (spent.left says how many; nullopt when it gave no number).
+    case keygrant::UseError::UsedUp: offerMoreExports(spent.left); break;
+    // KeyGrant could not be reached, and this is past what this device may spend without it.
+    case keygrant::UseError::OfflineLimit: askToConnect(); break;
+    // NoMeter, NotLicensed, Revoked, Device, Upgrade, Outdated, Storage, InvalidAmount.
+    default: showMeterProblem(*spent.error); break;
+  }
+}
+
+const keygrant::LicenseStatus status = license.status();   // offline, from the lease
+status.meters.at("exports");   // MeterStatus{left 950, total 1000, offline 100, unsynced 0, resets false}
+```
+
+Like every call it **blocks**, so make it off your UI thread (the Qt example above works the same way).
+
+- **Online it is exact.** The server takes `n` only while the meter has room for all of it. Two calls are two spends;
+  the SDK's own retries and reports never count one twice.
+- **With no answer it spends from an allowance.** No network, a timeout, a 5xx, a 429 or an answer the SDK cannot use:
+  the device spends from its offline allowance for that meter (set on the licence model; a tenth of the meter by
+  default, 0 for online only), never past what it last heard is left, answers `offline == true`, and reports the spend
+  with its next request. Past either, `OfflineLimit`. A spend the allowance would refuse asks the server first,
+  whatever the last outage left behind, so a customer who is back online is not refused for it (once a minute while
+  KeyGrant stays out of reach); one the allowance covers is not asked again for a minute after an outage, growing to an
+  hour. The unsynced spends are kept with the licence (`StoredState::spends`), so they survive a restart and a second
+  instance of the app, and a spend the SDK cannot save yet is kept in memory: the customer always gets the use they
+  were told they had, and it is reported once it has been saved. A `status()` on a valid lease reports the journal
+  too, once its own wait is over, so a device back online gives its allowance back.
+- **It needs a key's lease** that licenses this build on this device (`NotLicensed` otherwise, without asking). A
+  device trial and an offline licence file have no meters.
+- **`deactivate()` clears the unsynced spends with the licence.** It sends them with the release (and the device's
+  fingerprints, so the server holds them to the seat's device), but clears them locally even when KeyGrant could not be
+  reached (`released` is then false), so what the server did not hear is lost: at most the offline allowance of each
+  meter. Activating another seat drops the old seat's spends unreported the same way.
+- **It never throws for an outcome**: every one is in the `UseResult`, behind a call that has not finished too (it
+  asks as usual and saves nothing: an offline spend is kept in memory and saved by the next call that can), and a state that cannot be
+  read just now, or an adapter that threw, is `Storage`. A `use` request waits at most 5 seconds for the server (less
+  when `httpTimeout` is shorter). Calls on one `License` run one at a time, this one among them, and a call takes no
+  cancellation: it runs to its bounded answer, so a spend that was made is the customer's.
+- **`n` is a `std::int64_t`**: anything outside 1 to `keygrant::kMaxMeterUses` (1,000,000,000) is `InvalidAmount`,
+  and a meter code that is not 1 to 32 UTF-16 units is `NoMeter`, both without asking anything. A code is matched
+  exactly, case included, as an entitlement's is.
+- **`status.meters`** is there on a `Licensed` status from a key's lease that names meters, and empty on every other
+  status: `left` is net of this device's unsynced spends, `total` is what the key holds (for good, or this period),
+  `offline` is this device's allowance, `unsynced` what it has spent and not reported, and `resets` is true for a
+  meter that comes back each billing period.
+- **A meter never takes the licence away.** Nothing reads one to decide whether the app is licensed: a meter that is
+  used up refuses spends, never the app.
+- An app built with an SDK from before meters licenses a metered key as any other and cannot spend.
+
 ### Buying from the app
 
 Give a customer who holds no key a Buy button that opens your Stripe Payment Link. The checkout emails them their
@@ -448,7 +511,10 @@ saves, and read so that only a missing file is "no state": a file that cannot be
 that does not parse is set aside as `<file>.<ms>.corrupt` (the newest three kept).
 
 `keygrant::FileStorage(path, options)` puts it elsewhere; `options.migrateFrom` copies a state you kept somewhere
-before, once. `keygrant::serializeState`/`parseState` give the format to a storage adapter of your own.
+before, once. `keygrant::serializeState`/`parseState` give the format to a storage adapter of your own. The journal of unsynced
+[metered](#metered-uses-counting-what-a-key-may-do) spends (`spends`) and the newest figures a spend was answered with
+(`meterFigures`) are fields of it: a storage that keeps the whole state keeps them, one that drops a field loses the
+report of what that field held.
 
 ## Threading
 
@@ -525,6 +591,16 @@ real one; the machine id's parsing for every platform, and this machine's own id
 against servers on 127.0.0.1, plain and TLS (a certificate no system trusts, CA-issued leaves whose revocation cannot be
 checked, redirects), on Linux and Windows alike.
 
+Metered uses have their own: the twelve metered groups of the conformance vectors (all but the two `useAmounts` that
+give `use` a fraction and a text), the pure decisions they pin, `use()` online and with no answer, the waits, what a
+request asks and reports, a spend held in memory after a failed save, two processes over one state file, and the
+journal's limits and its horizon. A property test (`tests/use_property_test.cpp`) runs 1,500 seeded sequences of
+spends, check-ins, releases and restarts from two processes over one state file, against a server that loses, delays
+and refuses answers (or loses them after recording the spend), a disk that refuses its writes and a clock that jumps,
+and holds the contract's invariants at every step and at the end. `PROPERTY_RUNS` and `PROPERTY_SEED` choose how many
+sequences run and from which seed; a case it finds is shrunk and printed as data, to be kept with the cases beside it
+(`tests/property/cases.json`).
+
 ## Parity with the reference
 
 Where this SDK differs from the Electron SDK, and why:
@@ -547,10 +623,14 @@ Where this SDK differs from the Electron SDK, and why:
 - **Numbers are 64-bit integers**, held to JavaScript's safe range (±(2^53-1)); a lease claim or stored time beyond
   it is saturated, which keeps every comparison with a real time or major as JavaScript makes it.
 - **A lease or licence-file payload nlohmann/json will not parse is refused whole**: one holding an escaped lone
-  surrogate (`"\ud800"`) or a number past a double's range (`1e400`) is `bad-claims` here, where the reference's
-  `JSON.parse` reads the first as a string and the second as `Infinity`, and keeps such an entitlement. The server never
-  signs either: its signer refuses an entitlement name or text with a lone surrogate, and an entitlement number that is
-  not finite, and every other claim is one it writes itself.
+  surrogate (`"\ud800"`) is `bad-claims` here, where the reference's `JSON.parse` reads it as a string and keeps the
+  entitlement. The server never signs one: its signer refuses an entitlement name or text with a lone surrogate, and
+  every other claim is one it writes itself.
+- **A number past a double's range** (`1e400`, which `JSON.parse` reads as `Infinity`) fails nothing: wherever the SDK
+  reads JSON from a lease, a licence file or a server's answer, the member it is the value of is read as absent, as a
+  member of another shape is. A meter holding one is dropped, as the reference drops one whose figure is not a whole
+  number, and the lease stands; an entitlement holding one is dropped too, where the reference keeps `Infinity`. The
+  server never signs an entitlement number that is not finite.
 - **The state file**: a leading byte-order mark is accepted (the reference sets such a file aside as corrupt); a known
   field of the wrong JSON type, or with a value this SDK does not know (a newer SDK's refusal or device kind), is read
   as absent; JSON that is not an object is no state. Fields this SDK does not know, and those values it cannot read, are
@@ -594,6 +674,15 @@ Where this SDK differs from the Electron SDK, and why:
 - **User-locked keys**: `activate(key, options)` and `importLicenseFile(content, options)` are overloads with an
   `ActivateOptions` struct, where the reference takes an optional second argument; a code is text here, where the
   reference also reads a code kept as a number.
+- **Metered uses**: `use(meter, n)` has a default `n` of 1 and answers a `UseResult` struct (`ok`, `left`, `offline`,
+  `error`) where the reference answers one object: `left` is a `std::optional<std::int64_t>` (nullopt where the reference
+  gives none), `error` a `std::optional<UseError>`. `n` is a `std::int64_t`, so a fraction and a text cannot be asked:
+  the two `useAmounts` vectors that give one are skipped. The call blocks and takes no cancellation: it runs to its
+  bounded answer, as every call of this SDK does. `StoredState::spends` and `meterFigures` are typed lists and maps, read
+  leniently as the reference reads them: a journal that is not a list, an entry or a figure of another shape, is read as
+  empty or left out, and so are the unknown members of a valid entry, so any save writes the state without them (the
+  reference keeps them until a journal change lands). A spend's id is 16 bytes from OpenSSL's random source
+  (`RAND_bytes`), which the SDK links already.
 - The SDK's fixed timings exist as `keygrant::detail::Timings` so the tests can run them shorter; it is not a stable API.
 - The conformance file's Windows and macOS `machineIds` cases script `reg.exe` and `ioreg`; the suite replays them
   through the API reads this SDK makes (the printed value is the value the API returns; a command that said no, or

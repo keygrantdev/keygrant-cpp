@@ -40,9 +40,12 @@ LicenseStatus Engine::status(bool forceOnline) {
   try {
     serial([&](bool readOnly) {
       stalled = readOnly;
-      if (!readOnly) saveUnsavedTrial();
-      const std::optional<StoredState> state = loadForStatus(readOnly);
-      result = state ? statusNow(*state, forceOnline, readOnly) : unreadable();
+      if (!readOnly) {
+        saveUnsavedTrial();
+        saveUnsavedJournal();
+      }
+      const std::optional<View> view = loadForStatus(readOnly);
+      result = view ? statusNow(*view, forceOnline, readOnly) : unreadable();
     });
   } catch (...) {
     // Never thrown out of status(): an app awaits it at launch. Nothing is
@@ -56,8 +59,8 @@ LicenseStatus Engine::status(bool forceOnline) {
 bool Engine::has(const std::string& code) {
   try {
     // From what is stored only, as a status behind an unsettled call answers: no ask, no write.
-    const std::optional<StoredState> state = loadForStatus(true);
-    return state && grants(statusNow(*state, false, true).entitlements, code);
+    const std::optional<View> view = loadForStatus(true);
+    return view && grants(statusNow(*view, false, true).entitlements, code);
   } catch (...) {
     // A state that cannot be read grants nothing just now.
     return false;
@@ -80,13 +83,13 @@ LicenseStatus Engine::startTrial() {
   try {
     serial([&](bool readOnly) {
       stalled = readOnly;
-      const std::optional<StoredState> state = loadForStatus(readOnly);
-      if (!state) {
+      const std::optional<View> view = loadForStatus(readOnly);
+      if (!view) {
         result = unreadable();
       } else if (!readOnly) {
-        result = startTrialNow(*state);
+        result = startTrialNow(view->state);
       } else {
-        result = trialStatus(*state, effectiveNow(*state));
+        result = trialStatus(view->state, effectiveNow(view->state));
       }
     });
   } catch (...) {
@@ -147,30 +150,48 @@ ActivateResult Engine::activateNow(const std::string& key, const ActivateOptions
       activationPatch(Activation{*entered, activationId, lease, *evaluated.claims, now, major_, identity->kind});
   Basis basis;
   basis.activation = Asked{askedAt, activationId, stored.verdictAt};
-  save(patch, std::nullopt, basis);
+  // Activating another seat drops the journal of the old one, unreported; the same seat keeps it.
+  saveWith(patch, std::nullopt, basis, {JournalOp::activatedOf(activationId)});
   return ActivateResult::success();
 }
 
 DeactivateResult Engine::deactivateNow() {
-  const StoredState state = load();
+  // What this process could not save lands first, so the release reports it: the journal goes with the seat.
+  saveUnsavedJournal();
+  const View view = this->view(false);
+  const StoredState& state = view.state;
   // Nothing held is nothing to release: the seat is as free as it gets. Nor is
   // a seat another device holds this one's to release (seatElsewhere).
   DeactivateResult result{true};
-  if (truthy(state.key) && truthy(state.activationId) && !seatElsewhere(state)) {
-    ordered_json body = ordered_json::object();
-    body["key"] = *state.key;
-    body["activationId"] = *state.activationId;
-    // Only a 200 is KeyGrant saying the seat is free. A 5xx, a 429 or a
-    // proxy's page is an answer, but not that one; no answer at all is none.
-    // The local licence is cleared whatever the server says.
-    const std::optional<Reply> reply = post("deactivate", body);
-    result.released = reply && reply->status == 200;
+  if (truthy(state.key) && truthy(state.activationId)) {
+    const Device here = device(timings_.machineId, state.deviceKind);
+    if (!seatElsewhere(state, here)) result.released = release(view, here);
   }
-  // Stamped, so that an answer to an older ask is not saved over it.
+  // Stamped, so that an answer to an older ask is not saved over it. The journal goes with the rest of the licence: what
+  // the release carried is all the server will hear of it.
   StatePatch patch = unkeyedPatch();
   patch.verdictAt = Change<std::int64_t>::set(effectiveNow(state));
-  save(patch);
+  saveWith(patch, std::nullopt, {}, {JournalOp::deactivated()});
   return result;
+}
+
+/**
+ * The release request, carrying the journal of unsynced spends and, with it, the device's fingerprints as a validate
+ * sends them (so the server holds the reports to the seat's device; none when it cannot tell). Only a 200 is KeyGrant
+ * saying the seat is free: a 5xx, a 429 or a proxy's page is an answer, but not that one; no answer at all is none. The
+ * local licence is cleared whatever the server says.
+ */
+bool Engine::release(const View& view, const Device& here) {
+  const StoredState& state = view.state;
+  ordered_json body = ordered_json::object();
+  body["key"] = *state.key;
+  body["activationId"] = *state.activationId;
+  if (const std::optional<ordered_json> reports = spendsReported(reportable(view))) {
+    body["spends"] = *reports;
+    if (here.canTell) body["fingerprints"] = here.fingerprints;
+  }
+  const std::optional<Reply> reply = post("deactivate", body);
+  return reply && reply->status == 200;
 }
 
 /**
@@ -181,13 +202,13 @@ DeactivateResult Engine::deactivateNow() {
  * (expired or not) held to a machine this run can tell is not this one
  * (heldElsewhere).
  */
-bool Engine::seatElsewhere(const StoredState& state) {
-  const Device here = device(timings_.machineId, state.deviceKind);
+bool Engine::seatElsewhere(const StoredState& state, const Device& here) {
   if (standingRefusal(state, major_, DeviceView{here.ownClaim, here.canTell}) == Refusal::Device) return true;
   return truthy(state.lease) && heldElsewhere(verify(*state.lease, effectiveNow(state)), here.claims, here.canTell);
 }
 
-LicenseStatus Engine::statusNow(const StoredState& state, bool forceOnline, bool readOnly) {
+LicenseStatus Engine::statusNow(const View& view, bool forceOnline, bool readOnly) {
+  const StoredState& state = view.state;
   // A stored offline licence file that licenses this build wins, offline, with
   // no ask and no write; one that does not answers only when no key path and no
   // running trial does.
@@ -195,15 +216,15 @@ LicenseStatus Engine::statusNow(const StoredState& state, bool forceOnline, bool
   if (file && file->state == LicenseState::Licensed) return *file;
   const std::int64_t now = effectiveNow(state);
   // A device refusal stands only for the device it was given for: who this is.
-  std::optional<DeviceView> view;
+  std::optional<DeviceView> deviceView;
   if (state.refused == Refusal::Device) {
     const Device here = device(timings_.machineId, state.deviceKind);
-    view = DeviceView{here.ownClaim, here.canTell};
+    deviceView = DeviceView{here.ownClaim, here.canTell};
   }
-  const std::optional<Refusal> refused = truthy(state.key) ? standingRefusal(state, major_, view) : std::nullopt;
+  const std::optional<Refusal> refused = truthy(state.key) ? standingRefusal(state, major_, deviceView) : std::nullopt;
   if (refused && readOnly) return invalidStatus(reasonOf(*refused), state.key);
-  if (refused) return refusedStatus(state, *refused, forceOnline);
-  if (truthy(state.key) && truthy(state.lease)) return licenseStatus(state, *state.lease, now, forceOnline, readOnly);
+  if (refused) return refusedStatus(view, *refused, forceOnline);
+  if (truthy(state.key) && truthy(state.lease)) return licenseStatus(view, *state.lease, now, forceOnline, readOnly);
   return trialOrFile(state, now, file, StatusAsk{forceOnline, readOnly});
 }
 
@@ -225,27 +246,35 @@ LicenseStatus Engine::trialOrFile(const StoredState& state, std::int64_t now, co
  * A refusal that stands for this build: answered as stored, and asked again
  * once the wait is over, or when forced, so a renewed or reinstated key heals.
  */
-LicenseStatus Engine::refusedStatus(const StoredState& state, Refusal refused, bool force) {
-  const LicenseStatus stored = invalidStatus(reasonOf(refused), state.key);
-  if (!askDue(state, clockNow(), force)) return stored;
-  return tryRenew(state).value_or(stored);
+LicenseStatus Engine::refusedStatus(const View& view, Refusal refused, bool force) {
+  const LicenseStatus stored = invalidStatus(reasonOf(refused), view.state.key);
+  if (!askDue(view.state, clockNow(), force)) return stored;
+  return tryRenew(view).value_or(stored);
 }
 
-LicenseStatus Engine::licenseStatus(const StoredState& state, const std::string& lease, std::int64_t now,
-                                    bool forceOnline, bool readOnly) {
+LicenseStatus Engine::licenseStatus(const View& view, const std::string& lease, std::int64_t now, bool forceOnline,
+                                    bool readOnly) {
+  const StoredState& state = view.state;
   const LeaseCheck evaluated = evaluate(lease, now, state.key, state.activationId, state.deviceKind);
-  // What the lease says offline, entitlements included: the answer whenever
+  // What the lease says offline, entitlements and meters included (the meters net of the journal): the answer whenever
   // the server gives no verdict (leaseStatus).
-  const LicenseStatus offline = leaseStatus(evaluated, state.key);
+  const LicenseStatus offline = evaluated.ok ? meteredStatus(leaseStatus(evaluated, state.key), *evaluated.claims, state)
+                                             : leaseStatus(evaluated, state.key);
   if (evaluated.ok) {
     if (readOnly) return offline;
-    const StoredState held = noteKept(state, *evaluated.claims, now);
+    const View held = noteKept(view, *evaluated.claims, now);
     if (forceOnline) return tryRenew(held).value_or(offline);
     // Asked, bounded in time, when the server should hear from this device
     // before the lease runs out (a newer major on an open lease, or a lease
-    // nearing its end) and the wait allows (asksOnValidLease). The valid lease
-    // is the answer when the ask gets no verdict.
-    if (!asksOnValidLease(*evaluated.claims, held, major_, now, clockNow())) return offline;
+    // nearing its end), or when it holds spends KeyGrant has not heard of and
+    // the journal's own wait is not running, and the wait allows
+    // (asksOnValidLease). The journal that asks is the one a request would
+    // report (reportable): spends held in memory that no request carries do not
+    // make status() ask at every call. The valid lease is the answer when the
+    // ask gets no verdict.
+    StoredState asking = held.state;
+    asking.spends = reportable(held);
+    if (!asksOnValidLease(*evaluated.claims, asking, major_, now, clockNow())) return offline;
     return tryRenew(held, timings_.statusCheck).value_or(offline);
   }
   // Locally invalid (expired, tampered, upgrade...): give the server a chance
@@ -253,14 +282,15 @@ LicenseStatus Engine::licenseStatus(const StoredState& state, const std::string&
   // forced; only when it is out of reach (or agrees) is the local reason the
   // answer.
   std::optional<LicenseStatus> renewed;
-  if (!readOnly && askDue(state, clockNow(), forceOnline)) renewed = tryRenew(state);
+  if (!readOnly && askDue(state, clockNow(), forceOnline)) renewed = tryRenew(view);
   return renewed.value_or(offline);
 }
 
-/** The state with this run noted in keptMajor, saved when that changed. */
-StoredState Engine::noteKept(const StoredState& state, const LeaseClaims& claims, std::int64_t now) {
+/** The view with this run noted in keptMajor, saved when that changed. */
+View Engine::noteKept(const View& view, const LeaseClaims& claims, std::int64_t now) {
+  const StoredState& state = view.state;
   const std::optional<std::int64_t> kept = keptWith(state.keptMajor, claims, now, major_);
-  if (kept == state.keptMajor) return state;
+  if (kept == state.keptMajor) return view;
   StatePatch patch;
   patch.keptMajor = Change<std::int64_t>::of(kept);
   // About this activation: not saved onto another one stored meanwhile.
@@ -269,7 +299,7 @@ StoredState Engine::noteKept(const StoredState& state, const LeaseClaims& claims
   saveBestEffort(patch, std::nullopt, basis);
   StoredState held = state;
   held.keptMajor = kept;
-  return held;
+  return view.with(std::move(held));
 }
 
 }  // namespace detail
@@ -285,6 +315,11 @@ License::~License() = default;
 
 // Each call holds the engine for as long as it runs, so a License destroyed
 // while a call is stuck in an adapter leaves that call to finish safely.
+
+UseResult License::use(const std::string& meter, std::int64_t n) {
+  const std::shared_ptr<detail::Engine> engine = engine_;
+  return engine->use(meter, n);
+}
 
 ActivateResult License::activate(const std::string& key) { return activate(key, ActivateOptions{}); }
 

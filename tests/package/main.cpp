@@ -17,5 +17,9 @@ int main(int argc, char** argv) {
   keygrant::License license(config);
   const keygrant::LicenseStatus status = license.status();
   std::cout << status << '\n';
+  // The metered-uses call through the installed headers: a licence that was never activated holds no meter to spend from.
+  const keygrant::UseResult spent = license.use("exports");
+  std::cout << spent << '\n';
+  if (spent.ok || spent.error != keygrant::UseError::NotLicensed) return 1;
   return status.state == keygrant::LicenseState::Unlicensed ? 0 : 1;
 }

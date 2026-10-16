@@ -190,7 +190,7 @@ TEST(TrialLeaseOf, ATrialLeaseNotValidHereSaysNothingOfItsEndOrItsEntitlements) 
 TEST(TrialStatusOf, ARunningTrialsEntitlementsAreItsOwnCopyNotTheMapItWasGiven) {
   StoredState state;
   state.trialStart = NOW;
-  state.trialLease = "stored";
+  state.trialLease.emplace("stored");
   Entitlements given = pro();
   const LicenseStatus running = trialStatusOf(state, NOW, true, NOW + DAY, given);
   given.insert_or_assign("edition", "studio");
@@ -200,7 +200,7 @@ TEST(TrialStatusOf, ARunningTrialsEntitlementsAreItsOwnCopyNotTheMapItWasGiven) 
 TEST(TrialStatusOf, ARunningTrialCarriesTheEntitlementsItIsGivenAnEndedOneNone) {
   StoredState state;
   state.trialStart = NOW;
-  state.trialLease = "stored";
+  state.trialLease.emplace("stored");
   LicenseStatus running = status(LicenseState::Trial);
   running.trialEndsAt = NOW + 3 * DAY;
   running.trialDaysLeft = 3;
@@ -419,7 +419,7 @@ TEST(Merged, ATrialAnswerTakesItsEndAndLeaseTogetherFromTheNewest) {
   StoredState stored;
   stored.trialStart = 50;
   stored.trialEndsAt = 500;
-  stored.trialLease = "NEWER";
+  stored.trialLease.emplace("NEWER");
   stored.trialAt = 2'000;
   const auto trialPatch = [](std::int64_t end, const char* lease) {
     StatePatch p;
