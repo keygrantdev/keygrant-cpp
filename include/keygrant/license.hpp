@@ -11,6 +11,7 @@
 
 #include "keygrant/adapters.hpp"
 #include "keygrant/license_file.hpp"
+#include "keygrant/pickup.hpp"
 #include "keygrant/types.hpp"
 
 namespace keygrant {
@@ -229,6 +230,48 @@ class License {
    * storage adapter's exception when the state cannot be read or saved.
    */
   DeactivateResult deactivate();
+
+  /**
+   * Ask KeyGrant to mail a code to `email`, the address a key was sold to. For a build that may not take a typed key (an
+   * App Store build): the customer types the code, then pickUp(email, code) hands back that address's keys, or
+   * restoreByEmail activates the one that fits. `ok` means the code is on its way when the address holds a key: the
+   * answer is the same when it holds none.
+   *
+   * The product's Key pickup must be on (PickupError::PickupDisabled otherwise). A blank address, or one longer than
+   * any, is PickupError::InvalidEmail, asking nothing. Stores nothing, runs beside any call, and never throws: no answer
+   * at all is PickupError::Network.
+   */
+  PickUpSentResult pickUp(const std::string& email);
+
+  /**
+   * The keys of the product that `email` was sold, for the `code` mailed to it: each with what the app may show (its
+   * `modelName`) and `held` when this device already holds a seat on it (the fingerprints a validate sends go with the
+   * code, when the device can tell who it is). An address with no key answers an empty list. Activate one with
+   * `activate(picked.key, {address, picked.activationCode})`, or let restoreByEmail choose.
+   *
+   * The address is judged first (PickupError::InvalidEmail), then the code: the ends trimmed, the spaces dropped, exactly
+   * six ASCII digits or PickupError::WrongCode, at once and asking nothing, so the address loses none of its wrong tries.
+   * The first confirm spends the code, so the keys it answered are kept in memory for 10 minutes by the address and code
+   * as sent: the same pair answers from them and asks nothing. Stores nothing (not the address, the code, the keys or a
+   * refusal), runs beside any call, never throws, and a 200 that holds no list of keys is PickupError::Network.
+   */
+  PickUpKeysResult pickUp(const std::string& email, const std::string& code);
+
+  /**
+   * Confirm a pickup's code and activate, on this device, the key of the address that fits this build: the one this
+   * device already holds a seat on, else one with a free seat, else the first. It activates as activate(key, options)
+   * would, with the address as the pickup sent it and, for a code-locked key, the code the pickup handed back, so
+   * nothing more is asked of the customer. The key is stored as an activation's is and never handed to the app; nothing
+   * else is stored. The keys the confirm answered are kept in memory for 10 minutes (see pickUp(email, code)), so a
+   * restore whose activation got no answer can be retried with the same code; a restore that activates drops them.
+   *
+   * Answers the confirm's errors (`pickupError`); then `noKey` for an address with no key, and ActivateError::Upgrade or
+   * ActivateError::Outdated (`error`) when none of its keys covers this build (Upgrade: they are for an older major, buy
+   * an upgrade; Outdated: update the app), activating nothing; then the activation's own errors, as they come. Behind a
+   * call that has not finished it answers ActivateError::Network, to retry, as activate() does. Throws as activate() does,
+   * when the stored state cannot be read or saved.
+   */
+  RestoreResult restoreByEmail(const std::string& email, const std::string& code);
 
   /**
    * Begin (or re-sync) a trial for this device. Never throws: as status() for

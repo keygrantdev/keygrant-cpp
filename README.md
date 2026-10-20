@@ -29,7 +29,7 @@ major can hold, and the two metered `useAmounts` that give `use` a fraction and 
 include(FetchContent)
 FetchContent_Declare(keygrant
   GIT_REPOSITORY https://github.com/keygrantdev/keygrant-cpp.git
-  GIT_TAG        0.7.0)
+  GIT_TAG        0.8.0)
 FetchContent_MakeAvailable(keygrant)
 
 target_link_libraries(my_app PRIVATE keygrant::keygrant)
@@ -39,7 +39,7 @@ or, with the repository vendored, `add_subdirectory(third_party/keygrant)`. Buil
 SDK builds no tests and never adds `-Werror` to your build.
 
 OpenSSL 3, libcurl and nlohmann/json must be findable by `find_package`. Installed (`cmake --install`), the SDK
-is a package: `find_package(keygrant 0.7 REQUIRED)` (a static install finds OpenSSL and CURL again for you).
+is a package: `find_package(keygrant 0.8 REQUIRED)` (a static install finds OpenSSL and CURL again for you).
 
 ### vcpkg (Windows, macOS)
 
@@ -151,6 +151,9 @@ named for parity and never returned.
 - `use(meter, n = 1)`: spends `n` uses of a meter the key's licence model counts, exact online and from an offline
   allowance with no answer, and answers a `UseResult` (`ok`, `left`, `offline`, `error`, a `UseError`). It never throws
   ([below](#metered-uses-counting-what-a-key-may-do)).
+- `pickUp(email)`, `pickUp(email, code)`, `restoreByEmail(email, code)`: restore a licence by the address its key was sold
+  to, for a build that may not take a typed key; none stores anything but the activation a restore makes
+  ([below](#restoring-a-licence-without-the-key-app-store-builds)).
 - `startTrial()`: never throws. A trial runs only while its trial lease (signed by KeyGrant to the trial's own end)
   is valid: the end stored beside it is unsigned, and editing it extends nothing. An answer whose trial lease this
   build cannot verify (signed with a key the product rotated to ahead of this build, say) never replaces a stored one
@@ -374,6 +377,58 @@ Like every call it **blocks**, so make it off your UI thread (the Qt example abo
   used up refuses spends, never the app.
 - An app built with an SDK from before meters licenses a metered key as any other and cannot spend.
 
+### Restoring a licence without the key (App Store builds)
+
+A build that may not take a typed licence key (an App Store build) restores a web buyer's licence by the address the
+key was sold to. The product's **Key pickup** must be on. The app asks for a code, the customer types the code that
+comes to that address, and the SDK activates the key that fits this build:
+
+```cpp
+// 1. Mail a code to the address the key was sold to (the answer is the same whether or not the address holds a key).
+const keygrant::PickUpSentResult sent = license.pickUp(emailBox.text());
+
+// 2. The customer types the code; restore.
+const keygrant::RestoreResult restored = license.restoreByEmail(emailBox.text(), codeBox.text());
+if (!restored.ok) {
+  if (restored.pickupError == keygrant::PickupError::WrongCode) askAgain();
+  if (restored.pickupError == keygrant::PickupError::CodeExpired) license.pickUp(emailBox.text());  // a new code
+  if (restored.pickupError == keygrant::PickupError::TooManyAttempts) waitSeconds(restored.retryAfter);
+  if (restored.noKey) showNoKeyUnderThatAddress();
+  if (restored.error == keygrant::ActivateError::Upgrade) offerAnUpgrade();      // the keys are for an older major
+  if (restored.error == keygrant::ActivateError::Outdated) askToUpdateTheApp();  // the keys start at a later major
+}
+```
+
+`pickUp(email, code)` hands back the address's keys instead (`PickUpKeysResult::keys`: show them by `modelName`, never
+the key) for an app that lets the customer choose; activate one with
+`activate(picked.key, {address, picked.activationCode})`. `restoreByEmail` chooses for the customer, among the keys that
+cover this build's major: the key this device already holds a seat on, else one with a free seat, else the first.
+
+| `PickupError` | Means | The app |
+|---|---|---|
+| `InvalidEmail` | the address is blank or longer than any | ask again |
+| `WrongCode` | not six digits, or not the address's live code | ask again |
+| `CodeExpired` | no live code (expired after 10 minutes, used, burnt by its fifth wrong try, or never asked for) | `pickUp(email)` again |
+| `TooManyAttempts` | thirty wrong codes for the address this hour, or too many asks or confirms from this network | wait `retryAfter` seconds |
+| `PickupDisabled` | the product's Key pickup is off | offer another way (support) |
+| `TryAgain` | a count could not be made | retry |
+| `Network` | no answer, or an answer that is not a pickup's | retry |
+
+A `RestoreResult` holds a refusal in one of three members: `pickupError` (the code was not taken), `noKey` (the address
+holds no key of the product) or `error`, an `ActivateError`: `Upgrade` (the keys are for an older major than this build)
+or `Outdated` (their lowest version is newer), activating nothing; then `activate`'s own errors (`Limit`, `Revoked`, ...) as
+they come, and `Network` behind a call that has not finished. The address and the code are prepared as an activation's
+are (trimmed, a code's spaces dropped) and refused at once, asking nothing, when the address is blank or the code is not
+six digits, so a mistyped code costs the address none of its wrong tries. `retryAfter` is read from the server's answer.
+The first confirm spends the code, so the keys it answered are kept in memory for 10 minutes (a code's life) by the
+address and code as sent: a confirm or a restore with the same pair answers from them and asks nothing, so a restore
+whose activation got no answer can be retried with the same code, and a restore after `pickUp(email, code)` needs no new
+one. A restore that activates drops them. Nothing about a pickup is stored (not the address, the code, the keys or a
+refusal): the two `pickUp` calls write nothing, never throw and run beside any call, and `restoreByEmail` stores only the
+activation, as `activate` does, runs one at a time with it, and throws as it does when the state cannot be read or saved.
+A pickup never takes a licence away. The rules are in the SDK contract's section on key pickup, which the conformance
+vectors `pickupAsks`, `pickupRefusals`, `pickedKeys` and `pickupChoices` hold this SDK to.
+
 ### Buying from the app
 
 Give a customer who holds no key a Buy button that opens your Stripe Payment Link. The checkout emails them their
@@ -591,6 +646,10 @@ real one; the machine id's parsing for every platform, and this machine's own id
 against servers on 127.0.0.1, plain and TLS (a certificate no system trusts, CA-issued leaves whose revocation cannot be
 checked, redirects), on Linux and Windows alike.
 
+Key pickup has its own: the four pickup groups of the conformance vectors, the requests, every refusal, nothing written by
+`pickUp`, a restore's activation with the address and the activation code, `noKey`, `Upgrade` and `Outdated`, the keys kept
+in memory, and a pickup behind a stuck call.
+
 Metered uses have their own: the twelve metered groups of the conformance vectors (all but the two `useAmounts` that
 give `use` a fraction and a text), the pure decisions they pin, `use()` online and with no answer, the waits, what a
 request asks and reports, a spend held in memory after a failed save, two processes over one state file, and the
@@ -605,6 +664,10 @@ sequences run and from which seed; a case it finds is shrunk and printed as data
 
 Where this SDK differs from the Electron SDK, and why:
 
+- **Key pickup** is `pickUp(email)`, `pickUp(email, code)` and `restoreByEmail(email, code)` as overloads, answering a
+  `PickUpSentResult`, a `PickUpKeysResult` and a `RestoreResult` (`ok`, `pickupError`, `noKey`, `error`, `retryAfter`),
+  where the reference resolves one `{ ok, error?, retryAfter? }` whose `error` holds any of the words; `restoreByEmail`
+  throws what `activate` throws (the storage's exception) where the reference rejects.
 - **Bad configuration throws at construction** (`std::invalid_argument`): a JWK that is not an Ed25519 public key
   (a private one included), an empty or path-like `product`, an `apiBaseUrl` that is not http(s), a `major` above
   99999 (the server refuses one in every request), a non-positive `httpTimeout`. The reference takes

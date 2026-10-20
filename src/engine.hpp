@@ -24,6 +24,7 @@
 #include "license_file.hpp"
 #include "meters.hpp"
 #include "offline.hpp"
+#include "pickup.hpp"
 #include "renewal.hpp"
 #include "wire.hpp"
 
@@ -62,6 +63,10 @@ class Engine {
   std::optional<std::string> upgradeUrl(const std::string& paymentLink);
   ImportLicenseFileResult importLicenseFile(std::string_view content, const ActivateOptions& options);
   void removeLicenseFile();
+  /// Key pickup (License::pickUp, restoreByEmail): pickup.cpp holds the pure pieces, engine_pickup.cpp the calls.
+  PickUpSentResult pickUp(const std::string& email);
+  PickUpKeysResult confirmPickup(const std::string& email, const std::string& code);
+  RestoreResult restoreByEmail(const std::string& email, const std::string& code);
 
   /**
    * Test support, not public API: whether the launch report in flight, if
@@ -247,6 +252,11 @@ class Engine {
   LicenseFileCheck checkFile(const std::string& token) const;
   std::optional<LicenseStatus> fileStatus(const StoredState& state) const;
 
+  // --- key pickup (engine_pickup.cpp) ---------------------------------------
+  RestoreResult restoreNow(const std::string& email, const std::string& code);
+  /// The keys a confirm with this address and code answered, while they are kept (kPickupKeysKeepMs).
+  std::optional<std::vector<PickedKey>> keptKeys(const std::string& email, const std::string& code);
+
   // --- the launch report (trials.cpp) --------------------------------------
   void reportLaunch(const StoredState& state, std::int64_t now);
   static void sendLaunch(const LaunchReport& report);
@@ -275,6 +285,16 @@ class Engine {
 
   std::mutex heldMutex_;
   Held held_;
+
+  /** The keys the last pickup confirm answered, with the address and code as sent and when: in memory only. */
+  struct KeptKeys {
+    std::string email;
+    std::string code;
+    std::vector<PickedKey> keys;
+    std::int64_t at = 0;
+  };
+  std::mutex keptMutex_;
+  std::optional<KeptKeys> kept_;
 
   std::shared_ptr<LaunchReports> reports_ = std::make_shared<LaunchReports>();
 };

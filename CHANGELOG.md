@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.8.0
+
+- Key pickup, for a build that may not take a typed licence key (an App Store build): a web buyer restores their
+  licence by the address the key was sold to. `License::pickUp(email)` mails a code to the address (`ok` whether or not
+  the address holds a key); `License::pickUp(email, code)` hands back the address's keys of the product
+  (`PickUpKeysResult::keys`, each a `PickedKey`: `key`, `model`, `modelName`, `state`, `entitlements`, `expiresAt`,
+  `versions`, `deviceLimit`, `activeDevices`, `held`, `sale`, `activationCode`), each marked `held` when this device already
+  holds a seat on it (the confirm names the device's fingerprints, as a validate does, when it can tell who it is); and
+  `License::restoreByEmail(email, code)` confirms the code and activates the key that fits this build (the one this device
+  holds a seat on, else one with a free seat, else the first, of the keys that cover the build's major) as
+  `activate(key, options)` would, with the address and, for a code-locked key, the code the pickup handed back. The
+  product's Key pickup must be on.
+- The errors are `PickupError` (`InvalidEmail`, `WrongCode`, `CodeExpired`, `TooManyAttempts`, `PickupDisabled`, `TryAgain`,
+  `Network`) with the server's `retryAfter` (seconds, from its answer's body), and a `RestoreResult` that holds a refusal in
+  `pickupError`, `noKey` or `error` (an `ActivateError`: `Upgrade` or `Outdated` when none of the keys covers the build, then
+  `activate`'s own). A blank address or a code that is not six digits (spaces inside it are dropped first) is refused by the
+  SDK itself before the server is asked, so a mistyped code costs the address none of its wrong tries. A `switch` over
+  every `ActivateError` is unchanged.
+- The keys a confirm answered are kept in memory (never stored) for 10 minutes by the address and code as sent: a confirm
+  or a restore with the same pair answers from them and asks nothing, since the first confirm spent the code, so a
+  restore whose activation got no answer can be retried with the same code. A restore that activates drops them.
+- Nothing else about a pickup is stored: not the address, the code or a refusal. The two `pickUp` calls write nothing,
+  never throw and run beside any call; `restoreByEmail` runs one at a time with the rest, answers
+  `ActivateError::Network` behind a call that has not finished (as `activate` does), and stores only the activation. A
+  pickup never takes a licence away. The conformance vectors' four new groups, `pickupAsks`, `pickupRefusals`,
+  `pickedKeys` and `pickupChoices`, hold it to the reference.
+- The user agent the libcurl adapter sends is `keygrant-cpp/0.8`.
+
 ## 0.7.0
 
 - Metered uses: `License::use(meter, n = 1)` spends `n` uses of a meter the key's licence model counts (1,000

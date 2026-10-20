@@ -1,4 +1,4 @@
-// The metered-uses groups of the conformance vectors, which close conformance/vectors.json: what every KeyGrant SDK
+// The metered-uses groups of the conformance vectors, which come before the key-pickup groups that close conformance/vectors.json: what every KeyGrant SDK
 // must answer for the same inputs, each answered from its own JSON through the functions the engine decides with.
 #include <optional>
 #include <set>

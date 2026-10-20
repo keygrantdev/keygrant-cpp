@@ -44,8 +44,9 @@ TEST(Conformance, EveryGroupInTheFileIsReplayedHere) {
       "licenseFileContainers", "licenseFiles", "filesAsLeases",
       // The user-lock groups: conformance_user_lock_test.cpp.
       "typedFor",     "userLockErrors"};
-  // The metered-uses groups close the file: conformance_meters_test.cpp.
+  // The metered-uses groups: conformance_meters_test.cpp. The key-pickup groups close the file: conformance_pickup_test.cpp.
   replayed.insert(meteredGroups().begin(), meteredGroups().end());
+  replayed.insert(pickupGroups().begin(), pickupGroups().end());
   std::set<std::string> inFile;
   for (const auto& [name, value] : vectors().items()) {
     if (value.is_array() && !value.empty() && value.front().is_object()) inFile.insert(name);
@@ -61,7 +62,7 @@ TEST(Conformance, TheConstantsAreTheReferences) {
     (void)value;
     inFile.insert(name);
   }
-  // The metered-uses constants close this block, as their groups close the file (conformance_meters_test.cpp checks them).
+  // The metered-uses constants close this block (conformance_meters_test.cpp checks them).
   for (const char* name : {"MAX_METER_USES", "MAX_PENDING_SPENDS", "MAX_PENDING_VOIDS", "PENDING_MAX_MS", "USE_TIMEOUT_MS"}) {
     inFile.erase(name);
   }

@@ -354,6 +354,21 @@ LicenseStatus License::startTrial() {
   return engine->startTrial();
 }
 
+PickUpSentResult License::pickUp(const std::string& email) {
+  const std::shared_ptr<detail::Engine> engine = engine_;
+  return engine->pickUp(email);
+}
+
+PickUpKeysResult License::pickUp(const std::string& email, const std::string& code) {
+  const std::shared_ptr<detail::Engine> engine = engine_;
+  return engine->confirmPickup(email, code);
+}
+
+RestoreResult License::restoreByEmail(const std::string& email, const std::string& code) {
+  const std::shared_ptr<detail::Engine> engine = engine_;
+  return engine->restoreByEmail(email, code);
+}
+
 ImportLicenseFileResult License::importLicenseFile(std::string_view content) {
   return importLicenseFile(content, ActivateOptions{});
 }

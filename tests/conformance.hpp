@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "crypto.hpp"
 #include "device.hpp"
@@ -43,6 +44,9 @@ keygrant::detail::StatePatch patchFrom(const json& j);
 
 keygrant::detail::Asked askedFrom(const json& j);
 keygrant::detail::Basis basisFrom(const json& j);
+
+/** The key-pickup groups, in the file's order. */
+const std::vector<std::string>& pickupGroups();
 
 /** The vectors' base claims: a valid licence lease's claims, which the pure decisions read one or two of. */
 keygrant::detail::LeaseClaims baseClaims();
