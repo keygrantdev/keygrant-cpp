@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "keygrant",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "KeyGrant licensing SDK for native desktop apps: offline-verified Ed25519 leases that fail in favour of the paying customer.",
   "homepage": "https://keygrant.dev",
   "dependencies": [

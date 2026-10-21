@@ -445,6 +445,8 @@ const keygrant::ActivateResult result = license.activate(enteredKey);
 For a customer who already holds a key, `upgradeUrl(paymentLink)` adds this install's activation to the link, so an
 upgrade sale finds the key it upgrades.
 
+Selling through Paddle? Pass your own checkout page's address instead of a payment link: the page reads `client_reference_id` from its address and gives it to Paddle.js as custom data (`customData: { client_reference_id }`), which is where KeyGrant reads it. KeyGrant's docs page "Selling through Paddle" has the page.
+
 ### Trials: what the app calls
 
 ```cpp

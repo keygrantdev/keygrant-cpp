@@ -285,7 +285,9 @@ class License {
    * or std::nullopt when the device holds no activated licence. Never the
    * licence key. Runs beside any other call, reading only. Throws
    * std::invalid_argument for a link that is not an absolute URL, and the
-   * storage adapter's exception when the state cannot be read.
+   * storage adapter's exception when the state cannot be read. Selling
+   * through Paddle, the link is the tenant's own checkout page, which gives
+   * `client_reference_id` to Paddle.js as custom data under the same name.
    */
   std::optional<std::string> upgradeUrl(const std::string& paymentLink);
 
