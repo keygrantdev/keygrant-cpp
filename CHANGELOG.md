@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0
+
+- The first stable release. The shared library is now `libkeygrant.so.1` (from 1.0 the SONAME is the major alone),
+  and an installed package answers `find_package(keygrant 1.0)`, as every later 1.x install will, but no longer `0.8`:
+  ask for `1.0`.
+- The user agent the libcurl adapter sends is `keygrant-cpp/1.0`. Nothing else changed since 0.8.1.
+
 ## 0.8.1
 
 - Documentation only, no code change: selling through Paddle, the upgrade link is your own checkout page,

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(keygrant
-  VERSION 0.8.1
+  VERSION 1.0.0
   DESCRIPTION "KeyGrant licensing SDK for native desktop apps"
   LANGUAGES CXX)
 
@@ -235,7 +235,7 @@ if(KEYGRANT_INSTALL)
     ${CMAKE_CURRENT_BINARY_DIR}/keygrantConfig.cmake
     INSTALL_DESTINATION ${KEYGRANT_CMAKE_DIR})
   write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/keygrantConfigVersion.cmake
-    COMPATIBILITY SameMinorVersion)
+    COMPATIBILITY SameMajorVersion)
   install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/keygrantConfig.cmake
     ${CMAKE_CURRENT_BINARY_DIR}/keygrantConfigVersion.cmake
